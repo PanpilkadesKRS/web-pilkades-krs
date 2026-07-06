@@ -1969,7 +1969,7 @@ function exportTMSToCSV() {
   }
 
   // Fungsi Koreksi dengan GPS
-  async function simpanKoreksi(e: React.FormEvent) {
+  async function simpanKoreksiGPS(e: React.FormEvent) {
     e.preventDefault();
     if (!koreksiWarga) return;
 
