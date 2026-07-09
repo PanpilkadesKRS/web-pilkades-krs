@@ -4986,7 +4986,7 @@ function ringkasUserAgent(ua: string | null) {
             <div className="flex-1">
               <p className={`font-black text-sm md:text-base ${g.teks}`}>{item.teks}</p>
               <p className="text-xs font-bold text-slate-400 mt-1">
-                {formatRentangTanggal(item.mulai, item.selesai)} · {item.keterangan}
+                {formatRentangTanggal(item.mulai!, item.selesai!)} · {item.keterangan}
               </p>
             </div>
             <span
