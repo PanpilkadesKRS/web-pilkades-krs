@@ -4906,7 +4906,7 @@ function ringkasUserAgent(ua: string | null) {
               {tahapBerikutnya.teks}
             </p>
             <p className="text-sm font-bold text-slate-500 mt-2">
-              {formatRentangTanggal(tahapBerikutnya.mulai, tahapBerikutnya.selesai)} ·{' '}
+              {formatRentangTanggal(tahapBerikutnya.mulai!, tahapBerikutnya.selesai!)} ·{' '}
               {tahapBerikutnya.keterangan}
             </p>
           </div>
