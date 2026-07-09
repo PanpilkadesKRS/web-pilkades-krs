@@ -8,7 +8,6 @@ import { supabase } from '../lib/supabase';
 // ==========================================
 const MASTER_MENU = [
   'Dashboard',
-  'Statistik',
   'Tahapan Pilkades',
   'Real Count',
   'Daftar Pemilih',
@@ -25,6 +24,7 @@ const MASTER_MENU = [
   'Saksi',
   'KPPS',
   'Hari H',
+  'Aktivitas Login',
   'Pengaturan',
 ];
 
@@ -37,10 +37,23 @@ const DAFTAR_RW = Array.from({ length: 6 }, (_, i) =>
 );
 const UKURAN_HALAMAN_DAFTAR_PEMILIH = 50;
 
+const DAFTAR_DUSUN = ['I', 'II', 'III'];
+
 // Tanggal Hari H Pilkades (dipakai buat hitung umur otomatis)
+const TANGGAL_DPS = new Date(2026, 7, 8, 23, 59, 59); // 8 Agustus 2026
+const TANGGAL_DPT = new Date(2026, 8, 4, 23, 59, 59); // 4 September 2026
 const TANGGAL_HARI_H = new Date(2026, 8, 20); // 20 September 2026
 
 const STATUS_TMS_LIST = ['Pindah', 'Meninggal', 'Tidak Dikenal'];
+
+const DAFTAR_RAGAM_DISABILITAS = [
+  'Fisik',
+  'Intelektual',
+  'Mental',
+  'Sensorik Wicara',
+  'Sensorik Rungu',
+  'Sensorik Netra',
+];
 
 function hitungUmurHariH(tanggalLahir: string | null) {
   if (!tanggalLahir) return null;
@@ -56,8 +69,124 @@ function hitungUmurHariH(tanggalLahir: string | null) {
   return umur;
 }
 
+function hitungCountdown(waktuSekarang: Date) {
+  const now = waktuSekarang.getTime();
+
+  let target: Date;
+  let label: string;
+  let warna: 'emerald' | 'indigo' | 'red';
+
+  if (now < TANGGAL_DPS.getTime()) {
+    target = TANGGAL_DPS;
+    label = 'Menuju Penetapan DPS';
+    warna = 'emerald';
+  } else if (now < TANGGAL_DPT.getTime()) {
+    target = TANGGAL_DPT;
+    label = 'Menuju Penetapan DPT';
+    warna = 'indigo';
+  } else if (now < TANGGAL_HARI_H.getTime()) {
+    target = TANGGAL_HARI_H;
+    label = 'Menuju Hari Pencoblosan';
+    warna = 'red';
+  } else {
+    return null; // semua tahapan sudah lewat
+  }
+
+  const selisih = target.getTime() - now;
+  const hari = Math.floor(selisih / (1000 * 60 * 60 * 24));
+  const jam = Math.floor((selisih % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const menit = Math.floor((selisih % (1000 * 60 * 60)) / (1000 * 60));
+  const detik = Math.floor((selisih % (1000 * 60)) / 1000);
+
+  return { label, hari, jam, menit, detik, warna, target };
+}
+
 function isTMS(item: any) {
   return STATUS_TMS_LIST.includes(item?.status_coklit);
+}
+
+function getDeviceId() {
+  let deviceId = localStorage.getItem('deviceIdPilkades');
+  if (!deviceId) {
+    deviceId = 'dev-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem('deviceIdPilkades', deviceId);
+  }
+  return deviceId;
+}
+
+    // ==========================================
+// DATA TAHAPAN PILKADES
+// ==========================================
+const DATA_TAHAPAN_PILKADES = [
+  { tipe: 'kategori', kode: 'A', label: 'PERSIAPAN' },
+  { tipe: 'item', no: 1, teks: 'Persetujuan biaya pemilihan dari Bupati', mulai: new Date(2026, 5, 12), selesai: new Date(2026, 6, 11), keterangan: '30 hari' },
+
+  { tipe: 'kategori', kode: 'B', label: 'PENCALONAN' },
+  { tipe: 'item', no: 2, teks: 'Pengumuman Pembentukan PPDP', mulai: new Date(2026, 6, 12), selesai: new Date(2026, 6, 12), keterangan: '1 hari' },
+  { tipe: 'item', no: 3, teks: 'Pembentukan PPDP', mulai: new Date(2026, 6, 13), selesai: new Date(2026, 6, 15), keterangan: '3 hari' },
+  { tipe: 'item', no: 4, teks: 'Penetapan dan Pembekalan PPDP', mulai: new Date(2026, 6, 16), selesai: new Date(2026, 6, 16), keterangan: '1 hari' },
+  { tipe: 'item', no: 5, teks: 'Pelaksanaan Data Pemilih', mulai: new Date(2026, 6, 17), selesai: new Date(2026, 7, 5), keterangan: '20 hari' },
+  { tipe: 'item', no: 6, teks: 'Penyusunan DPS hasil Pemutakhiran Data Pemilih dan TPS sementara', mulai: new Date(2026, 7, 6), selesai: new Date(2026, 7, 8), keterangan: '3 hari' },
+  { tipe: 'item', no: 7, teks: 'Pengumuman DPS', mulai: new Date(2026, 7, 9), selesai: new Date(2026, 7, 11), keterangan: '3 hari' },
+  { tipe: 'item', no: 8, teks: 'Usulan perbaikan Daftar Pemilih Sementara', mulai: new Date(2026, 7, 12), selesai: new Date(2026, 7, 26), keterangan: '15 hari' },
+  { tipe: 'item', no: 9, teks: 'Pengumuman pendaftaran calon kepala desa', mulai: new Date(2026, 6, 25), selesai: new Date(2026, 6, 25), keterangan: '1 hari' },
+  { tipe: 'item', no: 10, teks: 'Pendaftaran bakal calon kepala desa', mulai: new Date(2026, 6, 26), selesai: new Date(2026, 7, 2), keterangan: '8 hari' },
+  { tipe: 'item', no: 11, teks: 'Perpanjangan pendaftaran Bakal Calon Kepala Desa jika bakal calon kades hanya 1 orang', mulai: new Date(2026, 7, 3), selesai: new Date(2026, 7, 17), keterangan: '15 hari' },
+  { tipe: 'item', no: 12, teks: 'Penelitian keabsahan administrasi kelengkapan persyaratan dan klarifikasi bakal calon kepala desa', mulai: new Date(2026, 7, 3), selesai: new Date(2026, 7, 22), keterangan: '20 hari' },
+  { tipe: 'item', no: 13, teks: 'Pelaporan bakal calon kepala Desa lebih dari 5 kepada panitia Kabupaten', mulai: new Date(2026, 7, 11), selesai: new Date(2026, 7, 15), keterangan: '5 hari' },
+  { tipe: 'item', no: 14, teks: 'Perpanjangan pendaftaran Bakal Calon Kepala Desa lanjutan jika bakal calon kades hanya 1 orang', mulai: new Date(2026, 7, 18), selesai: new Date(2026, 7, 27), keterangan: '10 hari' },
+  { tipe: 'item', no: 15, teks: 'Pelaksanaan seleksi bakal calon kepala desa lebih dari 5 calon', mulai: new Date(2026, 7, 16), selesai: new Date(2026, 7, 22), keterangan: '7 hari' },
+  { tipe: 'item', no: 16, teks: 'Pengumuman hasil administrasi bakal calon kepala Desa', mulai: new Date(2026, 7, 23), selesai: new Date(2026, 7, 23), keterangan: '1 hari' },
+  { tipe: 'item', no: 17, teks: 'Tanggapan masukan masyarakat dan penyelesaian pengaduan hasil administrasi bakal calon kepala Desa', mulai: new Date(2026, 7, 24), selesai: new Date(2026, 7, 26), keterangan: '3 hari' },
+  { tipe: 'item', no: 18, teks: 'Penetapan calon kepala desa dan penetapan nomor urut cakades', mulai: new Date(2026, 7, 27), selesai: new Date(2026, 7, 27), keterangan: '1 hari' },
+  { tipe: 'item', no: 19, teks: 'Pengumuman nomor urut calon kepala desa', mulai: new Date(2026, 7, 28), selesai: new Date(2026, 7, 30), keterangan: '3 hari' },
+  { tipe: 'item', no: 20, teks: 'Pencatatan Daftar Pemilih Tambahan', mulai: new Date(2026, 7, 29), selesai: new Date(2026, 7, 31), keterangan: '3 hari' },
+  { tipe: 'item', no: 21, teks: 'Pengumuman Daftar Pemilih Tambahan', mulai: new Date(2026, 8, 1), selesai: new Date(2026, 8, 3), keterangan: '3 hari' },
+  { tipe: 'item', no: 22, teks: 'Penetapan Daftar Pemilih Tetap (DPT)', mulai: new Date(2026, 8, 4), selesai: new Date(2026, 8, 5), keterangan: '2 hari' },
+  { tipe: 'item', no: 23, teks: 'Pengumuman Pembentukan KPPS', mulai: new Date(2026, 7, 31), selesai: new Date(2026, 7, 31), keterangan: '1 hari' },
+  { tipe: 'item', no: 24, teks: 'Pembentukan KPPS', mulai: new Date(2026, 8, 1), selesai: new Date(2026, 8, 7), keterangan: '7 hari' },
+  { tipe: 'item', no: 25, teks: 'Penetapan dan Pembekalan KPPS', mulai: new Date(2026, 8, 8), selesai: new Date(2026, 8, 9), keterangan: '2 hari' },
+  { tipe: 'item', no: 26, teks: 'Penyusunan Titik Lokasi TPS', mulai: new Date(2026, 8, 10), selesai: new Date(2026, 8, 12), keterangan: '3 hari' },
+  { tipe: 'item', no: 27, teks: 'Pengumuman hari, tanggal, waktu dan alamat TPS kepada pemilih', mulai: new Date(2026, 8, 12), selesai: new Date(2026, 8, 12), keterangan: '1 hari' },
+  { tipe: 'item', no: 28, teks: 'Rapat Persiapan Kampanye', mulai: new Date(2026, 8, 13), selesai: new Date(2026, 8, 13), keterangan: '1 hari' },
+  { tipe: 'item', no: 29, teks: 'Pelaksanaan Kampanye', mulai: new Date(2026, 8, 14), selesai: new Date(2026, 8, 16), keterangan: '3 hari' },
+  { tipe: 'item', no: 30, teks: 'Masa Tenang', mulai: new Date(2026, 8, 17), selesai: new Date(2026, 8, 19), keterangan: '3 hari' },
+
+  { tipe: 'kategori', kode: 'C', label: 'PELAKSANAAN' },
+  { tipe: 'item', no: 31, teks: 'Pemungutan Suara', mulai: new Date(2026, 8, 20), selesai: new Date(2026, 8, 20), keterangan: '1 hari' },
+  { tipe: 'item', no: 32, teks: 'Penghitungan hasil Pemungutan Suara', mulai: new Date(2026, 8, 20), selesai: new Date(2026, 8, 21), keterangan: '2 hari' },
+
+  { tipe: 'kategori', kode: 'D', label: 'PENETAPAN' },
+  { tipe: 'item', no: 33, teks: 'Penetapan Calon Kepala Desa terpilih oleh Panitia Pilkades', mulai: new Date(2026, 8, 21), selesai: new Date(2026, 8, 21), keterangan: '1 hari' },
+  { tipe: 'item', no: 34, teks: 'Penyampaian Penetapan Calon Kepala Desa dari Panitia ke BPD', mulai: new Date(2026, 8, 21), selesai: new Date(2026, 8, 27), keterangan: '7 hari' },
+  { tipe: 'item', no: 35, teks: 'BPD menyampaikan Penetapan Calon Kepala Desa terpilih kepada Bupati', mulai: new Date(2026, 8, 22), selesai: new Date(2026, 8, 28), keterangan: '7 hari' },
+  { tipe: 'item', no: 36, teks: 'Panitia tingkat Kabupaten menyelesaikan perselisihan hasil Pilkades', mulai: new Date(2026, 8, 23), selesai: new Date(2026, 9, 22), keterangan: '30 hari' },
+  { tipe: 'item', no: 37, teks: 'Proses Penerbitan SK kepala Desa terpilih oleh Bupati', mulai: new Date(2026, 8, 24), selesai: new Date(2026, 9, 23), keterangan: '30 hari' },
+  { tipe: 'item', no: 38, teks: 'Pelantikan Kepala Desa Terpilih oleh Bupati / Pejabat yang ditunjuk', mulai: new Date(2026, 10, 4), selesai: new Date(2026, 10, 4), keterangan: '1 hari' },
+];
+
+function formatTanggalSingkat(d: Date) {
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatRentangTanggal(mulai: Date, selesai: Date) {
+  if (mulai.getTime() === selesai.getTime()) return formatTanggalSingkat(mulai);
+  const bulanSama =
+    mulai.getMonth() === selesai.getMonth() && mulai.getFullYear() === selesai.getFullYear();
+  if (bulanSama) return `${mulai.getDate()} - ${formatTanggalSingkat(selesai)}`;
+  return `${formatTanggalSingkat(mulai)} - ${formatTanggalSingkat(selesai)}`;
+}
+
+function getStatusTahapan(item: any, now: Date) {
+  const akhirHari = new Date(
+    item.selesai.getFullYear(),
+    item.selesai.getMonth(),
+    item.selesai.getDate(),
+    23, 59, 59
+  );
+  if (now.getTime() > akhirHari.getTime()) return 'selesai';
+  if (now.getTime() < item.mulai.getTime()) return 'akan_datang';
+  return 'berlangsung';
 }
 
 // ==========================================
@@ -130,6 +259,16 @@ export default function Home() {
   const [stats, setStats] = useState({ total: 0, belum: 0, sudah: 0, lakiLaki: 0, perempuan: 0 });
   const [progresPerWilayah, setProgresPerWilayah] = useState<any[]>([]);
   const [loadingProgresWilayah, setLoadingProgresWilayah] = useState(false);
+  const [waktuSekarang, setWaktuSekarang] = useState(new Date());
+  // --- STATE FUNNEL DATA (DASHBOARD) ---
+  const [dataFunnel, setDataFunnel] = useState({
+    total: 0,
+    sudahCoklit: 0,
+    divalidasiAdmin: 0,
+    masukDPS: 0,
+    masukDPT: 0,
+  });
+
 
   // --- STATE TUGAS COKLIT ---
   const [dataCoklit, setDataCoklit] = useState<any[]>([]);
@@ -242,6 +381,11 @@ export default function Home() {
   const [modalPemilihBaru, setModalPemilihBaru] = useState<any | null>(null);
   const [loadingPemilihBaru, setLoadingPemilihBaru] = useState(false);
 
+  // --- STATE AKTIVITAS LOGIN ---
+  const [dataLogLogin, setDataLogLogin] = useState<any[]>([]);
+  const [loadingLogLogin, setLoadingLogLogin] = useState(false);
+
+
   useEffect(() => {
     fetchLogo();
     const savedSession = localStorage.getItem('sesiPetugasPilkades');
@@ -252,6 +396,13 @@ export default function Home() {
         setActiveMenu(userData.akses_menu[0]);
       else setActiveMenu('Kosong');
     }
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setWaktuSekarang(new Date());
+    }, 1000);
+    return () => clearInterval(interval);
   }, []);
 
   // ==========================================
@@ -274,6 +425,7 @@ export default function Home() {
     } else if (activeMenu === 'Dashboard') {
       fetchStats();
       fetchProgresPerWilayah();
+      fetchFunnelData();
     } else if (activeMenu === 'Tugas Coklit') {
       fetchTugasCoklit();
       fetchStatistikCoklit();
@@ -296,6 +448,8 @@ export default function Home() {
       fetchTMS();
     } else if (activeMenu === 'DPT/Tambahan') {
       fetchDPTTambahan();
+    } else if (activeMenu === 'Aktivitas Login') {
+      fetchLogLogin();
     }
   }, [activeMenu]);
 
@@ -465,21 +619,30 @@ export default function Home() {
   // FUNGSI DASHBOARD
   // ==========================================
   async function fetchStats() {
-    const { count: total } = await supabase
-      .from('penduduk')
-      .select('*', { count: 'exact', head: true });
-    const { count: belum } = await supabase
-      .from('penduduk')
-      .select('*', { count: 'exact', head: true })
-      .or('status_coklit.is.null,status_coklit.eq.Belum Coklit');
-    const { count: lakiLaki } = await supabase
-      .from('penduduk')
-      .select('*', { count: 'exact', head: true })
-      .eq('JENIS_KELAMIN', 'L');
-    const { count: perempuan } = await supabase
-      .from('penduduk')
-      .select('*', { count: 'exact', head: true })
-      .eq('JENIS_KELAMIN', 'P');
+    if (!user) return;
+
+    // Helper: kalau Petugas Coklit, kunci ke RT/RW dia. Kalau Admin/Super Admin, lihat semua.
+    const baseFilter = (query: any) => {
+      if (user?.role === 'Petugas Coklit') {
+        if (user?.rt_assigned) query = query.eq('RT', user.rt_assigned);
+        if (user?.rw_assigned) query = query.eq('RW', user.rw_assigned);
+      }
+      return query;
+    };
+
+    const { count: total } = await baseFilter(
+      supabase.from('penduduk').select('*', { count: 'exact', head: true })
+    );
+    const { count: belum } = await baseFilter(
+      supabase.from('penduduk').select('*', { count: 'exact', head: true })
+    ).or('status_coklit.is.null,status_coklit.eq.Belum Coklit');
+    const { count: lakiLaki } = await baseFilter(
+      supabase.from('penduduk').select('*', { count: 'exact', head: true })
+    ).eq('JENIS_KELAMIN', 'L');
+    const { count: perempuan } = await baseFilter(
+      supabase.from('penduduk').select('*', { count: 'exact', head: true })
+    ).eq('JENIS_KELAMIN', 'P');
+
     setStats({
       total: total || 0,
       belum: belum || 0,
@@ -500,6 +663,7 @@ export default function Home() {
         () => {
           fetchStats();
           fetchProgresPerWilayah();
+          fetchFunnelData();
         }
       )
       .subscribe();
@@ -520,10 +684,18 @@ export default function Home() {
     const ukuranHalaman = 1000;
   
     while (true) {
-      const { data: halaman, error } = await supabase
+      let queryHalaman = supabase
         .from('penduduk')
         .select('RT, RW, status_coklit')
         .range(dariBaris, dariBaris + ukuranHalaman - 1);
+
+      // KALAU PETUGAS COKLIT: kunci ke RT/RW dia sendiri
+      if (user?.role === 'Petugas Coklit') {
+        if (user?.rt_assigned) queryHalaman = queryHalaman.eq('RT', user.rt_assigned);
+        if (user?.rw_assigned) queryHalaman = queryHalaman.eq('RW', user.rw_assigned);
+      }
+
+      const { data: halaman, error } = await queryHalaman;
   
       if (error) {
         errorPenduduk = error;
@@ -611,6 +783,41 @@ export default function Home() {
     setProgresPerWilayah(hasil);
     setLoadingProgresWilayah(false);
   }
+
+  async function fetchFunnelData() {
+    const baseFilter = (query: any) => {
+      if (user?.role === 'Petugas Coklit') {
+        if (user?.rt_assigned) query = query.eq('RT', user.rt_assigned);
+        if (user?.rw_assigned) query = query.eq('RW', user.rw_assigned);
+      }
+      return query;
+    };
+  
+    const { count: total } = await baseFilter(
+      supabase.from('penduduk').select('*', { count: 'exact', head: true })
+    );
+    const { count: belum } = await baseFilter(
+      supabase.from('penduduk').select('*', { count: 'exact', head: true })
+    ).or('status_coklit.is.null,status_coklit.eq.Belum Coklit');
+    const { count: divalidasiAdmin } = await baseFilter(
+      supabase.from('penduduk').select('*', { count: 'exact', head: true })
+    ).eq('divalidasi_admin', true);
+    const { count: masukDPS } = await baseFilter(
+      supabase.from('penduduk').select('*', { count: 'exact', head: true })
+    ).eq('status_coklit', 'Ditemui').eq('divalidasi_admin', true);
+    const { count: masukDPT } = await baseFilter(
+      supabase.from('penduduk').select('*', { count: 'exact', head: true })
+    ).eq('status_dpt', 'DPT');
+  
+    setDataFunnel({
+      total: total || 0,
+      sudahCoklit: (total || 0) - (belum || 0),
+      divalidasiAdmin: divalidasiAdmin || 0,
+      masukDPS: masukDPS || 0,
+      masukDPT: masukDPT || 0,
+    });
+  }
+
   // ==========================================
   // FUNGSI TUGAS COKLIT
   // ==========================================
@@ -989,6 +1196,7 @@ export default function Home() {
       RW: modalEditCoklit.RW,
       TPS: modalEditCoklit.TPS,
       status_coklit: modalEditCoklit.status_coklit,
+      ragam_disabilitas: modalEditCoklit.ragam_disabilitas || null,
     };
 
     if (langsungValidasi) {
@@ -1194,11 +1402,14 @@ export default function Home() {
       'Nama',
       'NIK',
       'NKK',
+      'Tanggal Lahir',
+      'Umur Hari H',
       'Alamat',
       'Dusun',
       'RT',
       'RW',
       'TPS',
+      'Ragam Disabilitas',
       'Status Coklit',
     ];
     const rows = dataToExport.map((item, idx) => [
@@ -1206,11 +1417,18 @@ export default function Home() {
       item.NAMA,
       item.NIK,
       item.NKK || '-',
+      item.TANGGAL_LAHIR
+        ? new Date(item.TANGGAL_LAHIR).toLocaleDateString('id-ID')
+        : '-',
+      hitungUmurHariH(item.TANGGAL_LAHIR) !== null
+        ? `${hitungUmurHariH(item.TANGGAL_LAHIR)} tahun`
+        : '-',
       item.ALAMAT || '-',
       item.DUSUN || '-',
       item.RT,
       item.RW,
       item.TPS,
+      item.ragam_disabilitas || '-',
       item.status_coklit,
     ]);
 
@@ -1383,11 +1601,14 @@ export default function Home() {
       'Nama',
       'NIK',
       'NKK',
+      'Tanggal Lahir',
+      'Umur Hari H',
       'Alamat',
       'Dusun',
       'RT',
       'RW',
       'TPS',
+      'Ragam Disabilitas',
       'Tanggal Masuk DPT',
     ];
     const rows = dataDPT.map((item, idx) => [
@@ -1395,11 +1616,18 @@ export default function Home() {
       item.NAMA,
       item.NIK,
       item.NKK || '-',
+      item.TANGGAL_LAHIR
+        ? new Date(item.TANGGAL_LAHIR).toLocaleDateString('id-ID')
+        : '-',
+      hitungUmurHariH(item.TANGGAL_LAHIR) !== null
+        ? `${hitungUmurHariH(item.TANGGAL_LAHIR)} tahun`
+        : '-',
       item.ALAMAT || '-',
       item.DUSUN || '-',
       item.RT,
       item.RW,
       item.TPS,
+      item.ragam_disabilitas || '-',
       item.tanggal_masuk_dpt
         ? new Date(item.tanggal_masuk_dpt).toLocaleDateString('id-ID')
         : '-',
@@ -1534,6 +1762,7 @@ async function simpanEditDaftarPemilih(e: React.FormEvent) {
       RT: modalEditDaftarPemilih.RT,
       RW: modalEditDaftarPemilih.RW,
       TPS: modalEditDaftarPemilih.TPS,
+      ragam_disabilitas: modalEditDaftarPemilih.ragam_disabilitas || null,
     })
     .eq('id', modalEditDaftarPemilih.id);
 
@@ -1968,6 +2197,36 @@ function exportTMSToCSV() {
     }
   }
 
+  // Fungsi Toggle Ragam Disabilitas
+  function toggleDisabilitas(item: any, ragam: string) {
+    const current = item.ragam_disabilitas
+      ? item.ragam_disabilitas.split(',').map((s: string) => s.trim()).filter(Boolean)
+      : [];
+    const updated = current.includes(ragam)
+      ? current.filter((r: string) => r !== ragam)
+      : [...current, ragam];
+    handleUpdateDisabilitas(item.id, updated.join(', '));
+  }
+
+  async function handleUpdateDisabilitas(id: string, ragamBaru: string) {
+    // Update UI instan
+    setDataCoklit((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, ragam_disabilitas: ragamBaru } : item
+      )
+    );
+
+    const { error } = await supabase
+      .from('penduduk')
+      .update({ ragam_disabilitas: ragamBaru || null })
+      .eq('id', id);
+
+    if (error) {
+      alert('Gagal menyimpan data disabilitas: ' + error.message);
+      fetchTugasCoklit();
+    }
+  }
+
   // Fungsi Koreksi dengan GPS
   async function simpanKoreksiGPS(e: React.FormEvent) {
     e.preventDefault();
@@ -2113,6 +2372,14 @@ function exportTMSToCSV() {
       if (data.akses_menu && data.akses_menu.length > 0)
         setActiveMenu(data.akses_menu[0]);
       else setActiveMenu('Kosong');
+
+      // CATAT LOG LOGIN
+    await supabase.from('log_login').insert({
+      petugas_id: data.id,
+      nama_petugas: data.nama_lengkap,
+      device_id: getDeviceId(),
+      user_agent: navigator.userAgent,
+    });
     }
     setLoginLoading(false);
   }
@@ -2201,6 +2468,58 @@ function exportTMSToCSV() {
       fetchDaftarAkun();
     }
   }
+
+  // ==========================================
+// FUNGSI AKTIVITAS LOGIN
+// ==========================================
+async function fetchLogLogin() {
+  setLoadingLogLogin(true);
+
+  const batasWaktu = new Date();
+  batasWaktu.setDate(batasWaktu.getDate() - 30);
+
+  const { data, error } = await supabase
+    .from('log_login')
+    .select('*')
+    .gte('waktu_login', batasWaktu.toISOString())
+    .order('waktu_login', { ascending: false });
+
+  if (error) {
+    console.error('Error Supabase (Log Login):', error);
+    alert('Error saat mengambil data log login: ' + error.message);
+  } else {
+    setDataLogLogin(data || []);
+  }
+  setLoadingLogLogin(false);
+}
+
+// Deteksi device mencurigakan: 2+ device_id beda dalam 1 hari kalender untuk petugas yang sama
+function deteksiLoginMencurigakan(data: any[]) {
+  const grouped: Record<string, Set<string>> = {};
+
+  data.forEach((log) => {
+    const tanggal = new Date(log.waktu_login).toLocaleDateString('id-ID');
+    const key = `${log.petugas_id}|${tanggal}`;
+    if (!grouped[key]) grouped[key] = new Set();
+    if (log.device_id) grouped[key].add(log.device_id);
+  });
+
+  const mencurigakan = new Set<string>();
+  Object.keys(grouped).forEach((key) => {
+    if (grouped[key].size >= 2) mencurigakan.add(key);
+  });
+
+  return mencurigakan;
+}
+
+function ringkasUserAgent(ua: string | null) {
+  if (!ua) return 'Tidak diketahui';
+  if (/android/i.test(ua)) return 'Android';
+  if (/iphone|ipad/i.test(ua)) return 'iOS';
+  if (/windows/i.test(ua)) return 'Windows';
+  if (/macintosh/i.test(ua)) return 'Mac';
+  return 'Lainnya';
+}
 
   async function hapusAkun(id: string, nama: string) {
     if (confirm(`Yakin ingin menghapus akun ${nama}?`)) {
@@ -2758,6 +3077,38 @@ function exportTMSToCSV() {
                                 ? 'Sudah dikunjungi'
                                 : 'Menunggu kunjungan'}
                             </span>
+                          </div>
+                        </div>
+
+                        <div className="mb-6">
+                          <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            </svg>
+                            Ragam Disabilitas (opsional, klik jika ada)
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {DAFTAR_RAGAM_DISABILITAS.map((ragam) => {
+                              const current = item.ragam_disabilitas
+                                ? item.ragam_disabilitas.split(',').map((s: string) => s.trim())
+                                : [];
+                              const isChecked = current.includes(ragam);
+                              return (
+                                <button
+                                  key={ragam}
+                                  type="button"
+                                  onClick={() => toggleDisabilitas(item, ragam)}
+                                  className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
+                                    isChecked
+                                      ? 'bg-purple-600 border-purple-600 text-white shadow-sm'
+                                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                                  }`}
+                                >
+                                  {ragam}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -3548,7 +3899,16 @@ function exportTMSToCSV() {
                           NIK
                         </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          Tanggal Lahir
+                        </th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          Umur Hari H
+                        </th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           RT/RW
+                        </th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          Disabilitas
                         </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           Status
@@ -3577,8 +3937,27 @@ function exportTMSToCSV() {
                             {item.NAMA}
                           </td>
                           <td className="p-4 font-mono">{item.NIK}</td>
+                          <td className="p-4 text-xs">
+                            {item.TANGGAL_LAHIR
+                              ? new Date(item.TANGGAL_LAHIR).toLocaleDateString('id-ID')
+                              : '-'}
+                          </td>
+                          <td className="p-4 text-xs font-bold">
+                            {hitungUmurHariH(item.TANGGAL_LAHIR) !== null
+                              ? `${hitungUmurHariH(item.TANGGAL_LAHIR)} tahun`
+                              : '-'}
+                          </td>
                           <td className="p-4">
                             {item.RT || '001'}/{item.RW || '001'}
+                          </td>
+                          <td className="p-4">
+                            {item.ragam_disabilitas ? (
+                              <span className="px-2 py-1 bg-purple-50 text-purple-700 border border-purple-100 rounded text-[10px] font-black uppercase">
+                                {item.ragam_disabilitas}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 text-xs">-</span>
+                            )}
                           </td>
                           <td className="p-4">
                             <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded text-[10px] font-black uppercase">
@@ -3676,7 +4055,7 @@ function exportTMSToCSV() {
                 <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
-                      <tr>
+                    <tr>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           Nama
                         </th>
@@ -3684,10 +4063,19 @@ function exportTMSToCSV() {
                           NIK
                         </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          Tgl Lahir
+                        </th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          Umur Hari H
+                        </th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           TPS
                         </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           RT/RW
+                        </th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          Disabilitas
                         </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           Tgl Masuk DPT
@@ -3707,9 +4095,28 @@ function exportTMSToCSV() {
                             {item.NAMA}
                           </td>
                           <td className="p-4 font-mono">{item.NIK}</td>
+                          <td className="p-4 text-xs">
+                            {item.TANGGAL_LAHIR
+                              ? new Date(item.TANGGAL_LAHIR).toLocaleDateString('id-ID')
+                              : '-'}
+                          </td>
+                          <td className="p-4 text-xs font-bold">
+                            {hitungUmurHariH(item.TANGGAL_LAHIR) !== null
+                              ? `${hitungUmurHariH(item.TANGGAL_LAHIR)} tahun`
+                              : '-'}
+                          </td>
                           <td className="p-4">{item.TPS || '01'}</td>
                           <td className="p-4">
                             {item.RT || '001'}/{item.RW || '001'}
+                          </td>
+                          <td className="p-4">
+                            {item.ragam_disabilitas ? (
+                              <span className="px-2 py-1 bg-purple-50 text-purple-700 border border-purple-100 rounded text-[10px] font-black uppercase">
+                                {item.ragam_disabilitas}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 text-xs">-</span>
+                            )}
                           </td>
                           <td className="p-4 text-xs text-slate-500">
                             {item.tanggal_masuk_dpt
@@ -3827,6 +4234,7 @@ function exportTMSToCSV() {
                 <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">Umur Hari H</th>
                 <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">Tempat Lahir</th>
                 <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">P/L</th>
+                <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">Disabilitas</th>
                 <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">Alamat</th>
                 <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">Dusun</th>
                 <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">RT/RW</th>
@@ -3874,6 +4282,15 @@ function exportTMSToCSV() {
                     </td>
                     <td className="p-4 text-xs">{item.TEMPAT_LAHIR || '-'}</td>
                     <td className="p-4">{item.KELAMIN || '-'}</td>
+                    <td className="p-4">
+                      {item.ragam_disabilitas ? (
+                        <span className="px-2 py-1 bg-purple-50 text-purple-700 border border-purple-100 rounded text-[10px] font-black uppercase">
+                          {item.ragam_disabilitas}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 text-xs">-</span>
+                      )}
+                    </td>
                     <td className="p-4 uppercase text-xs">{item.ALAMAT || '-'}</td>
                     <td className="p-4">{item.DUSUN || '-'}</td>
                     <td className="p-4">
@@ -4341,11 +4758,318 @@ function exportTMSToCSV() {
   </div>
 )}
 
+{activeMenu === 'Aktivitas Login' && (
+  <div className="max-w-6xl mx-auto pb-10">
+    <div className="mb-6">
+      <h2 className="text-2xl font-black text-slate-900">
+        Aktivitas Login
+      </h2>
+      <p className="text-sm text-slate-500 font-bold mt-1">
+        Riwayat login petugas 30 hari terakhir. Petugas yang login dari 2
+        device berbeda di hari yang sama akan ditandai mencurigakan.
+      </p>
+    </div>
+
+    {loadingLogLogin ? (
+      <div className="flex justify-center py-20">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
+      </div>
+    ) : dataLogLogin.length === 0 ? (
+      <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+        Belum ada data login dalam 30 hari terakhir.
+      </div>
+    ) : (
+      (() => {
+        const mencurigakan = deteksiLoginMencurigakan(dataLogLogin);
+
+        return (
+          <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                    Nama Petugas
+                  </th>
+                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                    Waktu Login
+                  </th>
+                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                    Perangkat
+                  </th>
+                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                    Device ID
+                  </th>
+                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                    Status
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {dataLogLogin.map((log) => {
+                  const tanggal = new Date(log.waktu_login).toLocaleDateString('id-ID');
+                  const key = `${log.petugas_id}|${tanggal}`;
+                  const isMencurigakan = mencurigakan.has(key);
+
+                  return (
+                    <tr
+                      key={log.id}
+                      className={`border-b border-slate-100 hover:bg-slate-50 ${
+                        isMencurigakan ? 'bg-red-50/60' : ''
+                      }`}
+                    >
+                      <td className="p-4 font-bold uppercase">
+                        {log.nama_petugas || '-'}
+                      </td>
+                      <td className="p-4 text-xs">
+                        {new Date(log.waktu_login).toLocaleString('id-ID', {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}
+                      </td>
+                      <td className="p-4">
+                        <span className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-200 rounded text-[10px] font-black uppercase">
+                          {ringkasUserAgent(log.user_agent)}
+                        </span>
+                      </td>
+                      <td className="p-4 font-mono text-[10px] text-slate-400">
+                        {log.device_id
+                          ? log.device_id.slice(0, 14) + '...'
+                          : '-'}
+                      </td>
+                      <td className="p-4">
+                        {isMencurigakan ? (
+                          <span className="px-2.5 py-1 bg-red-100 text-red-700 border border-red-200 rounded text-[10px] font-black uppercase whitespace-nowrap">
+                            ⚠️ Multi-Device
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded text-[10px] font-black uppercase">
+                            Normal
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()
+    )}
+  </div>
+)}
+
+{activeMenu === 'Tahapan Pilkades' && (
+  <div className="max-w-5xl mx-auto pb-10">
+    <div className="mb-6">
+      <h2 className="text-2xl font-black text-slate-900">
+        Tahapan Pilkades Serentak
+      </h2>
+      <p className="text-sm text-slate-500 font-bold mt-1">
+        Jadwal Perubahan Tahapan Pemilihan Kepala Desa Serentak Masa Bakti 2026-2034.
+      </p>
+    </div>
+
+    {/* KARTU TAHAP AKTIF SEKARANG */}
+    {(() => {
+      const tahapBerlangsung = DATA_TAHAPAN_PILKADES.find(
+        (i) => i.tipe === 'item' && getStatusTahapan(i, waktuSekarang) === 'berlangsung'
+      );
+      const tahapBerikutnya = DATA_TAHAPAN_PILKADES.find(
+        (i) => i.tipe === 'item' && getStatusTahapan(i, waktuSekarang) === 'akan_datang'
+      );
+
+      if (tahapBerlangsung) {
+        return (
+          <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-2xl p-6 mb-8 shadow-lg text-white">
+            <p className="text-xs font-black uppercase tracking-widest text-white/70 mb-2 flex items-center gap-2">
+              <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+              Sedang Berlangsung
+            </p>
+            <p className="text-xl md:text-2xl font-black leading-snug">
+              {tahapBerlangsung.teks}
+            </p>
+            <p className="text-sm font-bold text-white/80 mt-2">
+              {formatRentangTanggal(tahapBerlangsung.mulai, tahapBerlangsung.selesai)} ·{' '}
+              {tahapBerlangsung.keterangan}
+            </p>
+          </div>
+        );
+      }
+      if (tahapBerikutnya) {
+        return (
+          <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-6 mb-8">
+            <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2">
+              Tahap Berikutnya
+            </p>
+            <p className="text-xl font-black text-slate-800 leading-snug">
+              {tahapBerikutnya.teks}
+            </p>
+            <p className="text-sm font-bold text-slate-500 mt-2">
+              {formatRentangTanggal(tahapBerikutnya.mulai, tahapBerikutnya.selesai)} ·{' '}
+              {tahapBerikutnya.keterangan}
+            </p>
+          </div>
+        );
+      }
+      return (
+        <div className="bg-slate-100 rounded-2xl p-6 mb-8 text-center font-bold text-slate-500">
+          Seluruh tahapan Pilkades sudah selesai.
+        </div>
+      );
+    })()}
+
+    {/* TIMELINE SELURUH TAHAPAN */}
+    <div className="space-y-3">
+      {DATA_TAHAPAN_PILKADES.map((item) => {
+        if (item.tipe === 'kategori') {
+          const warnaKategori: Record<string, string> = {
+            A: 'bg-slate-800',
+            B: 'bg-indigo-600',
+            C: 'bg-orange-500',
+            D: 'bg-emerald-600',
+          };
+          return (
+            <div
+              key={`kat-${item.kode}`}
+              className={`${warnaKategori[item.kode]} text-white px-5 py-3 rounded-xl font-black text-sm uppercase tracking-widest mt-6 first:mt-0 shadow-sm`}
+            >
+              {item.kode}. {item.label}
+            </div>
+          );
+        }
+
+        const status = getStatusTahapan(item, waktuSekarang);
+        const gaya: Record<string, { border: string; badge: string; teks: string }> = {
+          selesai: {
+            border: 'border-slate-200',
+            badge: 'bg-slate-100 text-slate-400 border-slate-200',
+            teks: 'text-slate-400',
+          },
+          berlangsung: {
+            border: 'border-emerald-400 ring-2 ring-emerald-100',
+            badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            teks: 'text-slate-800',
+          },
+          akan_datang: {
+            border: 'border-slate-200',
+            badge: 'bg-white text-slate-500 border-slate-200',
+            teks: 'text-slate-700',
+          },
+        };
+        const g = gaya[status];
+
+        return (
+          <div
+            key={item.no}
+            className={`bg-white rounded-2xl border-2 ${g.border} shadow-sm p-4 md:p-5 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5`}
+          >
+            <div className="flex items-center gap-3 shrink-0">
+              <span
+                className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black border-2 shrink-0 ${
+                  status === 'selesai'
+                    ? 'bg-slate-100 border-slate-200 text-slate-400'
+                    : status === 'berlangsung'
+                    ? 'bg-emerald-600 border-emerald-600 text-white'
+                    : 'bg-white border-slate-200 text-slate-500'
+                }`}
+              >
+                {status === 'selesai' ? (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                ) : (
+                  item.no
+                )}
+              </span>
+            </div>
+            <div className="flex-1">
+              <p className={`font-black text-sm md:text-base ${g.teks}`}>{item.teks}</p>
+              <p className="text-xs font-bold text-slate-400 mt-1">
+                {formatRentangTanggal(item.mulai, item.selesai)} · {item.keterangan}
+              </p>
+            </div>
+            <span
+              className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider border whitespace-nowrap ${g.badge}`}
+            >
+              {status === 'selesai'
+                ? 'Selesai'
+                : status === 'berlangsung'
+                ? '● Berlangsung'
+                : 'Akan Datang'}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+)}
+
           {/* ======================================================== */}
           {/* KONTEN MENU LAINNYA (DASHBOARD & PENGATURAN TETAP) */}
           {/* ======================================================== */}
           {activeMenu === 'Dashboard' && (
             <div className="max-w-6xl mx-auto">
+              {(() => {
+  const cd = hitungCountdown(waktuSekarang);
+  if (!cd) return null;
+
+  const warnaKelas: Record<string, string> = {
+    emerald: 'from-emerald-500 to-emerald-700',
+    indigo: 'from-indigo-500 to-indigo-700',
+    red: 'from-red-500 to-red-700',
+  };
+
+  return (
+    <div
+      className={`bg-gradient-to-br ${warnaKelas[cd.warna]} rounded-2xl p-6 md:p-8 mb-8 shadow-lg text-white`}
+    >
+      {/* SAPAAN */}
+      <p className="text-sm md:text-base font-black text-white mb-3">
+        Halo, {user.role}! 👋
+      </p>
+
+      <p className="text-xs font-black uppercase tracking-widest text-white/70 mb-1">
+        {cd.label}
+      </p>
+      <p className="text-sm font-bold text-white/90 mb-5">
+        Target:{' '}
+        {cd.target.toLocaleDateString('id-ID', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        })}
+      </p>
+
+      {/* GRID COUNTDOWN — sekarang full width, gak dibatasi max-w-lg */}
+      <div className="grid grid-cols-4 gap-3 md:gap-5 w-full">
+        {[
+          { label: 'Hari', nilai: cd.hari },
+          { label: 'Jam', nilai: cd.jam },
+          { label: 'Menit', nilai: cd.menit },
+          { label: 'Detik', nilai: cd.detik },
+        ].map((box) => (
+          <div
+            key={box.label}
+            className="bg-white/15 backdrop-blur-sm rounded-xl p-3 md:p-5 text-center flex flex-col items-center gap-2"
+          >
+            {/* KOTAK KECIL KHUSUS ANGKA, DI DALAM KOTAK BESAR */}
+            <div className="bg-white/15 rounded-lg w-full py-2 md:py-3">
+              <p className="text-3xl md:text-5xl font-black tabular-nums">
+                {String(box.nilai).padStart(2, '0')}
+              </p>
+            </div>
+            <p className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-white/70">
+              {box.label}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+})()}
+
               <div className="mb-6">
                 <h2 className="text-2xl font-black text-slate-900">
                   Ringkasan Progres Coklit
@@ -4358,7 +5082,7 @@ function exportTMSToCSV() {
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-1.5 h-full bg-slate-800"></div>
                   <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-2">
-                    Total DPT
+                    Jumlah Pemilih
                   </span>
                   <span className="text-4xl sm:text-5xl font-black text-slate-800">
                     {stats.total}
@@ -4411,6 +5135,138 @@ function exportTMSToCSV() {
         </p>
       </div>
 
+{/* RANKING PETUGAS */}
+<div className="mt-8">
+  <div className="mb-4">
+    <h3 className="text-lg font-black text-slate-900">
+      Ranking Petugas
+    </h3>
+    <p className="text-xs text-slate-500 font-bold">
+      Berdasarkan persentase progres coklit wilayah masing-masing
+    </p>
+  </div>
+
+  {(() => {
+    const petugasList = progresPerWilayah.filter((w) => w.namaPetugas);
+    if (petugasList.length === 0) {
+      return (
+        <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+          Belum ada petugas dengan data progres.
+        </div>
+      );
+    }
+
+    const top3 = [...petugasList].sort((a, b) => b.persen - a.persen).slice(0, 3);
+    const bottom3 = [...petugasList].sort((a, b) => a.persen - b.persen).slice(0, 3);
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* TOP PERFORMER */}
+        <div className="bg-white p-5 rounded-2xl border border-emerald-200 shadow-sm">
+          <p className="text-xs font-black text-emerald-600 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+            🏆 Paling Produktif
+          </p>
+          <div className="space-y-3">
+            {top3.map((p, idx) => (
+              <div key={`top-${p.rt}-${p.rw}`} className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-black flex items-center justify-center">
+                    {idx + 1}
+                  </span>
+                  <div>
+                    <p className="text-sm font-black text-slate-800">
+                      {p.namaPetugas}
+                    </p>
+                    <p className="text-[10px] font-bold text-slate-400">
+                      RT {p.rt}/RW {p.rw}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-sm font-black text-emerald-600">
+                  {p.persen}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* BOTTOM PERFORMER */}
+        <div className="bg-white p-5 rounded-2xl border border-red-200 shadow-sm">
+          <p className="text-xs font-black text-red-600 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+            ⚠️ Perlu Perhatian
+          </p>
+          <div className="space-y-3">
+            {bottom3.map((p, idx) => (
+              <div key={`bottom-${p.rt}-${p.rw}`} className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="w-6 h-6 rounded-full bg-red-100 text-red-700 text-xs font-black flex items-center justify-center">
+                    {idx + 1}
+                  </span>
+                  <div>
+                    <p className="text-sm font-black text-slate-800">
+                      {p.namaPetugas}
+                    </p>
+                    <p className="text-[10px] font-bold text-slate-400">
+                      RT {p.rt}/RW {p.rw}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-sm font-black text-red-600">
+                  {p.persen}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  })()}
+</div>
+
+{/* FUNNEL DATA */}
+<div className="mt-8">
+  <div className="mb-4">
+    <h3 className="text-lg font-black text-slate-900">
+      Alur Data Pemilih
+    </h3>
+    <p className="text-xs text-slate-500 font-bold">
+      Perjalanan data dari total penduduk sampai masuk DPT
+    </p>
+  </div>
+
+  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+    {[
+      { label: 'Total Penduduk', nilai: dataFunnel.total, warna: 'bg-slate-700' },
+      { label: 'Sudah Coklit', nilai: dataFunnel.sudahCoklit, warna: 'bg-orange-500' },
+      { label: 'Divalidasi Admin', nilai: dataFunnel.divalidasiAdmin, warna: 'bg-teal-500' },
+      { label: 'Masuk DPS', nilai: dataFunnel.masukDPS, warna: 'bg-indigo-500' },
+      { label: 'Masuk DPT', nilai: dataFunnel.masukDPT, warna: 'bg-emerald-600' },
+    ].map((tahap) => {
+      const persen = dataFunnel.total > 0
+        ? Math.round((tahap.nilai / dataFunnel.total) * 100)
+        : 0;
+      return (
+        <div key={tahap.label}>
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-xs font-black text-slate-600 uppercase tracking-wide">
+              {tahap.label}
+            </span>
+            <span className="text-xs font-black text-slate-500">
+              {tahap.nilai} ({persen}%)
+            </span>
+          </div>
+          <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full ${tahap.warna} transition-all rounded-full`}
+              style={{ width: `${persen}%` }}
+            ></div>
+          </div>
+        </div>
+      );
+    })}
+  </div>
+</div>
+
       {loadingProgresWilayah ? (
         <div className="flex justify-center py-20">
           <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
@@ -4420,7 +5276,13 @@ function exportTMSToCSV() {
           Belum ada data.
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div
+          className={
+            progresPerWilayah.length === 1
+              ? 'grid grid-cols-1 gap-4'
+              : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'
+          }
+        >
           {progresPerWilayah.map((w) => {
             const warnaBar =
               w.persen >= 80
@@ -4607,6 +5469,8 @@ function exportTMSToCSV() {
             activeMenu !== 'Daftar Pemilih' &&
             activeMenu !== 'TMS' &&
             activeMenu !== 'DPT/Tambahan' &&
+            activeMenu !== 'Aktivitas Login' &&
+            activeMenu !== 'Tahapan Pilkades' &&
             activeMenu !== '' && (
               <div className="text-center mt-20">
                 <div className="w-20 h-20 bg-slate-200 rounded-full mx-auto mb-4 flex items-center justify-center">
@@ -5157,8 +6021,7 @@ function exportTMSToCSV() {
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       Dusun
                     </label>
-                    <input
-                      type="text"
+                    <select
                       value={modalPemilihBaru.DUSUN}
                       onChange={(e) =>
                         setModalPemilihBaru({
@@ -5166,8 +6029,15 @@ function exportTMSToCSV() {
                           DUSUN: e.target.value,
                         })
                       }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
-                    />
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih Dusun --</option>
+                      {DAFTAR_DUSUN.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
@@ -5341,17 +6211,23 @@ function exportTMSToCSV() {
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       Dusun
                     </label>
-                    <input
-                      type="text"
-                      value={modalEditCoklit.DUSUN}
+                    <select
+                      value={modalPemilihBaru.DUSUN}
                       onChange={(e) =>
                         setModalEditCoklit({
                           ...modalEditCoklit,
                           DUSUN: e.target.value,
                         })
                       }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
-                    />
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih Dusun --</option>
+                      {DAFTAR_DUSUN.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
@@ -5431,6 +6307,48 @@ function exportTMSToCSV() {
                       <option value="Meninggal">Meninggal</option>
                       <option value="Tidak Dikenal">Tidak Dikenal</option>
                     </select>
+                  </div>
+                     {/* RAGAM DISABILITAS — VERIFIKASI ULANG OLEH ADMIN */}
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">
+                      Ragam Disabilitas
+                    </label>
+                    <p className="text-[10px] font-bold text-slate-400 mb-2">
+                      Cek ulang, hilangkan centang kalau petugas salah pilih di lapangan.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {DAFTAR_RAGAM_DISABILITAS.map((ragam) => {
+                        const current = modalEditCoklit.ragam_disabilitas
+                          ? modalEditCoklit.ragam_disabilitas
+                              .split(',')
+                              .map((s: string) => s.trim())
+                              .filter(Boolean)
+                          : [];
+                        const isChecked = current.includes(ragam);
+                        return (
+                          <button
+                            key={ragam}
+                            type="button"
+                            onClick={() => {
+                              const updated = isChecked
+                                ? current.filter((r: string) => r !== ragam)
+                                : [...current, ragam];
+                              setModalEditCoklit({
+                                ...modalEditCoklit,
+                                ragam_disabilitas: updated.join(', '),
+                              });
+                            }}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
+                              isChecked
+                                ? 'bg-purple-600 border-purple-600 text-white shadow-sm'
+                                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                          >
+                            {ragam}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -5568,17 +6486,23 @@ function exportTMSToCSV() {
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       Dusun
                     </label>
-                    <input
-                      type="text"
-                      value={modalKoreksiEdit.DUSUN}
+                    <select
+                      value={modalPemilihBaru.DUSUN}
                       onChange={(e) =>
                         setModalKoreksiEdit({
                           ...modalKoreksiEdit,
                           DUSUN: e.target.value,
                         })
                       }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
-                    />
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih Dusun --</option>
+                      {DAFTAR_DUSUN.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
@@ -5844,17 +6768,23 @@ function exportTMSToCSV() {
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       Dusun
                     </label>
-                    <input
-                      type="text"
-                      value={modalEditDaftarPemilih.DUSUN}
+                    <select
+                      value={modalPemilihBaru.DUSUN}
                       onChange={(e) =>
                         setModalEditDaftarPemilih({
                           ...modalEditDaftarPemilih,
                           DUSUN: e.target.value,
                         })
                       }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
-                    />
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih Dusun --</option>
+                      {DAFTAR_DUSUN.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
@@ -5913,6 +6843,48 @@ function exportTMSToCSV() {
                         </option>
                       ))}
                     </select>
+                  </div>
+                  {/* RAGAM DISABILITAS */}
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">
+                      Ragam Disabilitas
+                    </label>
+                    <p className="text-[10px] font-bold text-slate-400 mb-2">
+                      Klik untuk centang/hapus. Boleh kosong kalau tidak ada.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {DAFTAR_RAGAM_DISABILITAS.map((ragam) => {
+                        const current = modalEditDaftarPemilih.ragam_disabilitas
+                          ? modalEditDaftarPemilih.ragam_disabilitas
+                              .split(',')
+                              .map((s: string) => s.trim())
+                              .filter(Boolean)
+                          : [];
+                        const isChecked = current.includes(ragam);
+                        return (
+                          <button
+                            key={ragam}
+                            type="button"
+                            onClick={() => {
+                              const updated = isChecked
+                                ? current.filter((r: string) => r !== ragam)
+                                : [...current, ragam];
+                              setModalEditDaftarPemilih({
+                                ...modalEditDaftarPemilih,
+                                ragam_disabilitas: updated.join(', '),
+                              });
+                            }}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
+                              isChecked
+                                ? 'bg-purple-600 border-purple-600 text-white shadow-sm'
+                                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                          >
+                            {ragam}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
