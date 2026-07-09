@@ -4932,7 +4932,7 @@ function ringkasUserAgent(ua: string | null) {
           return (
             <div
               key={`kat-${item.kode}`}
-              className={`${warnaKategori[item.kode]} text-white px-5 py-3 rounded-xl font-black text-sm uppercase tracking-widest mt-6 first:mt-0 shadow-sm`}
+              className={`${warnaKategori[item.kode!]} text-white px-5 py-3 rounded-xl font-black text-sm uppercase tracking-widest mt-6 first:mt-0 shadow-sm`}
             >
               {item.kode}. {item.label}
             </div>
