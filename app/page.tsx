@@ -2351,40 +2351,56 @@ function exportTMSToCSV() {
   // ==========================================
   // FUNGSI LOGIN & LOGOUT
   // ==========================================
-  async function handleLogin(e: React.FormEvent) {
+ async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoginLoading(true);
     setLoginError('');
 
+    const email = `${username}@pilkades.internal`;
+
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (authError || !authData.user) {
+      setLoginError('Username atau Password salah!');
+      setLoginLoading(false);
+      return;
+    }
+
     const { data, error } = await supabase
       .from('akun_petugas')
       .select('*')
-      .eq('username', username)
-      .eq('password', password)
+      .eq('auth_user_id', authData.user.id)
       .single();
 
     if (error || !data) {
-      setLoginError('Username atau Password salah!');
-    } else {
-      setUser(data);
-      if (rememberMe)
-        localStorage.setItem('sesiPetugasPilkades', JSON.stringify(data));
-      if (data.akses_menu && data.akses_menu.length > 0)
-        setActiveMenu(data.akses_menu[0]);
-      else setActiveMenu('Kosong');
+      setLoginError('Login berhasil tapi data petugas tidak ditemukan. Hubungi admin.');
+      setLoginLoading(false);
+      return;
+    }
 
-      // CATAT LOG LOGIN
+    setUser(data);
+    if (rememberMe)
+      localStorage.setItem('sesiPetugasPilkades', JSON.stringify(data));
+    if (data.akses_menu && data.akses_menu.length > 0)
+      setActiveMenu(data.akses_menu[0]);
+    else setActiveMenu('Kosong');
+
+    // CATAT LOG LOGIN
     await supabase.from('log_login').insert({
       petugas_id: data.id,
       nama_petugas: data.nama_lengkap,
       device_id: getDeviceId(),
       user_agent: navigator.userAgent,
     });
-    }
+
     setLoginLoading(false);
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    await supabase.auth.signOut();
     setUser(null);
     setUsername('');
     setPassword('');
@@ -6212,7 +6228,7 @@ function ringkasUserAgent(ua: string | null) {
                       Dusun
                     </label>
                     <select
-                      value={modalPemilihBaru.DUSUN}
+                      value={modalEditCoklit.DUSUN}
                       onChange={(e) =>
                         setModalEditCoklit({
                           ...modalEditCoklit,
@@ -6769,7 +6785,7 @@ function ringkasUserAgent(ua: string | null) {
                       Dusun
                     </label>
                     <select
-                      value={modalPemilihBaru.DUSUN}
+                      value={modalEditDaftarPemilih.DUSUN}
                       onChange={(e) =>
                         setModalEditDaftarPemilih({
                           ...modalEditDaftarPemilih,
