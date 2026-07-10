@@ -6503,7 +6503,7 @@ function ringkasUserAgent(ua: string | null) {
                       Dusun
                     </label>
                     <select
-                      value={modalPemilihBaru.DUSUN}
+                      value={modalKoreksiEdit.DUSUN}
                       onChange={(e) =>
                         setModalKoreksiEdit({
                           ...modalKoreksiEdit,
