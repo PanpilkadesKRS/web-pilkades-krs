@@ -387,6 +387,19 @@ export default function Home() {
   const [dataLogLogin, setDataLogLogin] = useState<any[]>([]);
   const [loadingLogLogin, setLoadingLogLogin] = useState(false);
   const latestFetchRef = useRef<any>({});
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Dipakai supaya refresh data dari realtime (aksi petugas lain) tidak
+  // membuat posisi scroll lompat ke atas. Posisi disimpan dulu, data
+  // di-refresh, lalu posisi dikembalikan setelah render selesai.
+  async function refetchTanpaGeserScroll(fn: () => Promise<any>) {
+    const container = scrollContainerRef.current;
+    const posisiScroll = container?.scrollTop ?? 0;
+    await fn();
+    requestAnimationFrame(() => {
+      if (container) container.scrollTop = posisiScroll;
+    });
+  }
 
   useEffect(() => {
     fetchLogo();
@@ -487,7 +500,7 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          latestFetchRef.current.fetchTMS();
+          refetchTanpaGeserScroll(() => latestFetchRef.current.fetchTMS());
         }
       )
       .subscribe();
@@ -520,7 +533,7 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          latestFetchRef.current.fetchDPTTambahan();
+          refetchTanpaGeserScroll(() => latestFetchRef.current.fetchDPTTambahan());
         }
       )
       .subscribe();
@@ -546,8 +559,10 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          latestFetchRef.current.fetchTugasCoklit();
-          latestFetchRef.current.fetchStatistikCoklit();
+          refetchTanpaGeserScroll(async () => {
+            await latestFetchRef.current.fetchTugasCoklit();
+            await latestFetchRef.current.fetchStatistikCoklit();
+          });
         }
       )
       .subscribe();
@@ -575,8 +590,10 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          latestFetchRef.current.fetchCoklitReview();
-          latestFetchRef.current.fetchCoklitValidasi();
+          refetchTanpaGeserScroll(async () => {
+            await latestFetchRef.current.fetchCoklitReview();
+            await latestFetchRef.current.fetchCoklitValidasi();
+          });
         }
       )
       .subscribe();
@@ -622,7 +639,7 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          latestFetchRef.current.fetchDaftarPemilih();
+          refetchTanpaGeserScroll(() => latestFetchRef.current.fetchDaftarPemilih());
         }
       )
       .subscribe();
@@ -678,9 +695,11 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          latestFetchRef.current.fetchStats();
-          latestFetchRef.current.fetchProgresPerWilayah();
-          latestFetchRef.current.fetchFunnelData();
+          refetchTanpaGeserScroll(async () => {
+            await latestFetchRef.current.fetchStats();
+            await latestFetchRef.current.fetchProgresPerWilayah();
+            await latestFetchRef.current.fetchFunnelData();
+          });
         }
       )
       .subscribe();
@@ -2963,7 +2982,7 @@ function ringkasUserAgent(ua: string | null) {
           </div>
         </header>
 
-        <div className="flex-1 p-6 md:p-8 overflow-y-auto bg-slate-50/50 relative">
+        <div ref={scrollContainerRef} className="flex-1 p-6 md:p-8 overflow-y-auto bg-slate-50/50 relative">
           {/* ======================================================== */}
           {/* KONTEN MENU: TUGAS COKLIT */}
           {/* ======================================================== */}
