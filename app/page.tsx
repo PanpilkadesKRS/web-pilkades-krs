@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 // ==========================================
@@ -384,18 +384,43 @@ export default function Home() {
   // --- STATE AKTIVITAS LOGIN ---
   const [dataLogLogin, setDataLogLogin] = useState<any[]>([]);
   const [loadingLogLogin, setLoadingLogLogin] = useState(false);
-
+  const latestFetchRef = useRef<any>({});
 
   useEffect(() => {
     fetchLogo();
-    const savedSession = localStorage.getItem('sesiPetugasPilkades');
-    if (savedSession) {
-      const userData = JSON.parse(savedSession);
-      setUser(userData);
-      if (userData.akses_menu && userData.akses_menu.length > 0)
-        setActiveMenu(userData.akses_menu[0]);
-      else setActiveMenu('Kosong');
+
+    async function pulihkanSesi() {
+      // Cek dulu ke Supabase apakah sesi auth masih valid — ini lebih
+      // diandalkan daripada cuma baca localStorage manual, supaya
+      // petugas gak tiba-tiba "keluar sendiri" kalau localStorage
+      // kosong/ke-reset (browser HP kadang reload tab di background).
+      const { data: { session } } = await supabase.auth.getSession();
+      const savedSession = localStorage.getItem('sesiPetugasPilkades');
+
+      if (session && savedSession) {
+        const userData = JSON.parse(savedSession);
+        setUser(userData);
+        if (userData.akses_menu && userData.akses_menu.length > 0)
+          setActiveMenu(userData.akses_menu[0]);
+        else setActiveMenu('Kosong');
+      } else if (session && !savedSession) {
+        // Sesi auth masih valid tapi data petugas belum ada di
+        // localStorage (misal "Ingat Saya" gak dicentang) -> ambil ulang
+        const { data } = await supabase
+          .from('akun_petugas')
+          .select('*')
+          .eq('auth_user_id', session.user.id)
+          .single();
+        if (data) {
+          setUser(data);
+          if (data.akses_menu && data.akses_menu.length > 0)
+            setActiveMenu(data.akses_menu[0]);
+          else setActiveMenu('Kosong');
+        }
+      }
     }
+
+    pulihkanSesi();
   }, []);
 
   useEffect(() => {
@@ -408,16 +433,6 @@ export default function Home() {
   // ==========================================
   // EFEK & LISTENER
   // ==========================================
-  useEffect(() => {
-    const savedSession = localStorage.getItem('sesiPetugasPilkades');
-    if (savedSession) {
-      const userData = JSON.parse(savedSession);
-      setUser(userData);
-      if (userData.akses_menu && userData.akses_menu.length > 0)
-        setActiveMenu(userData.akses_menu[0]);
-      else setActiveMenu('Kosong');
-    }
-  }, []);
 
   useEffect(() => {
     if (activeMenu === 'Pengaturan') {
@@ -470,7 +485,7 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          fetchTMS();
+          latestFetchRef.current.fetchTMS();
         }
       )
       .subscribe();
@@ -503,7 +518,7 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          fetchDPTTambahan();
+          latestFetchRef.current.fetchDPTTambahan();
         }
       )
       .subscribe();
@@ -529,8 +544,8 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          fetchTugasCoklit();
-          fetchStatistikCoklit();
+          latestFetchRef.current.fetchTugasCoklit();
+          latestFetchRef.current.fetchStatistikCoklit();
         }
       )
       .subscribe();
@@ -558,8 +573,8 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          fetchCoklitReview();
-          fetchCoklitValidasi();
+          latestFetchRef.current.fetchCoklitReview();
+          latestFetchRef.current.fetchCoklitValidasi();
         }
       )
       .subscribe();
@@ -605,7 +620,7 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          fetchDaftarPemilih();
+          latestFetchRef.current.fetchDaftarPemilih();
         }
       )
       .subscribe();
@@ -661,9 +676,9 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'penduduk' },
         () => {
-          fetchStats();
-          fetchProgresPerWilayah();
-          fetchFunnelData();
+          latestFetchRef.current.fetchStats();
+          latestFetchRef.current.fetchProgresPerWilayah();
+          latestFetchRef.current.fetchFunnelData();
         }
       )
       .subscribe();
@@ -2591,6 +2606,20 @@ function ringkasUserAgent(ua: string | null) {
       setLogoUrl(publicUrlData.publicUrl);
     }
   }
+
+  latestFetchRef.current = {
+    fetchTugasCoklit,
+    fetchStatistikCoklit,
+    fetchCoklitReview,
+    fetchCoklitValidasi,
+    fetchDPTTambahan,
+    fetchTMS,
+    fetchDaftarPemilih,
+    fetchStats,
+    fetchProgresPerWilayah,
+    fetchFunnelData,
+  };
+
   // ==========================================
   // TAMPILAN 1: HALAMAN LOGIN
   // ==========================================
