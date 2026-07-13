@@ -35,6 +35,9 @@ const DAFTAR_RT = Array.from({ length: 3 }, (_, i) =>
 const DAFTAR_RW = Array.from({ length: 6 }, (_, i) =>
   String(i + 1).padStart(3, '0')
 );
+
+const BATAS_ONLINE_MENIT = 2;
+
 const UKURAN_HALAMAN_DAFTAR_PEMILIH = 50;
 
 const DAFTAR_DUSUN = ['I', 'II', 'III'];
@@ -386,8 +389,8 @@ export default function Home() {
   const [loadingEditPemilihBaru, setLoadingEditPemilihBaru] = useState(false);
 
   // --- STATE AKTIVITAS LOGIN ---
-  const [dataLogLogin, setDataLogLogin] = useState<any[]>([]);
-  const [loadingLogLogin, setLoadingLogLogin] = useState(false);
+  const [dataStatusLogin, setDataStatusLogin] = useState<any[]>([]);
+  const [loadingStatusLogin, setLoadingStatusLogin] = useState(false);
   const latestFetchRef = useRef<any>({});
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -481,7 +484,7 @@ export default function Home() {
     } else if (activeMenu === 'DPT/Tambahan') {
       fetchDPTTambahan();
     } else if (activeMenu === 'Aktivitas Login') {
-      fetchLogLogin();
+      fetchStatusLoginAkun();
     }
   }, [activeMenu]);
 
@@ -2682,53 +2685,97 @@ async function simpanEditPemilihBaru(e: React.FormEvent) {
   // ==========================================
 // FUNGSI AKTIVITAS LOGIN
 // ==========================================
-async function fetchLogLogin() {
-  setLoadingLogLogin(true);
+async function fetchStatusLoginAkun() {
+  setLoadingStatusLogin(true);
 
-  const batasWaktu = new Date();
-  batasWaktu.setDate(batasWaktu.getDate() - 30);
+  // 1. Ambil semua akun petugas
+  const { data: akunList, error: errorAkun } = await supabase
+    .from('akun_petugas')
+    .select('id, nama_lengkap, username, role')
+    .order('nama_lengkap', { ascending: true });
 
-  const { data, error } = await supabase
+  if (errorAkun) {
+    console.error('Error Supabase (Akun):', errorAkun);
+    alert('Error saat mengambil data akun: ' + errorAkun.message);
+    setLoadingStatusLogin(false);
+    return;
+  }
+
+  // 2. Ambil log login HARI INI SAJA (cukup buat status & deteksi multi-device,
+  // biar query-nya ringan, gak tarik 30 hari kayak sebelumnya)
+  const awalHariIni = new Date();
+  awalHariIni.setHours(0, 0, 0, 0);
+
+  const { data: logHariIni, error: errorLog } = await supabase
     .from('log_login')
     .select('*')
-    .gte('waktu_login', batasWaktu.toISOString())
+    .gte('waktu_login', awalHariIni.toISOString())
     .order('waktu_login', { ascending: false });
 
-  if (error) {
-    console.error('Error Supabase (Log Login):', error);
-    alert('Error saat mengambil data log login: ' + error.message);
-  } else {
-    setDataLogLogin(data || []);
+  if (errorLog) {
+    console.error('Error Supabase (Log Login):', errorLog);
+    alert('Error saat mengambil data log login: ' + errorLog.message);
+    setLoadingStatusLogin(false);
+    return;
   }
-  setLoadingLogLogin(false);
-}
 
-// Deteksi device mencurigakan: 2+ device_id beda dalam 1 hari kalender untuk petugas yang sama
-function deteksiLoginMencurigakan(data: any[]) {
-  const grouped: Record<string, Set<string>> = {};
-
-  data.forEach((log) => {
-    const tanggal = new Date(log.waktu_login).toLocaleDateString('id-ID');
-    const key = `${log.petugas_id}|${tanggal}`;
-    if (!grouped[key]) grouped[key] = new Set();
-    if (log.device_id) grouped[key].add(log.device_id);
+  // 3. Kelompokkan log hari ini per petugas_id
+  const grouped: Record<string, any[]> = {};
+  (logHariIni || []).forEach((log) => {
+    if (!grouped[log.petugas_id]) grouped[log.petugas_id] = [];
+    grouped[log.petugas_id].push(log);
   });
 
-  const mencurigakan = new Set<string>();
-  Object.keys(grouped).forEach((key) => {
-    if (grouped[key].size >= 2) mencurigakan.add(key);
+  const sekarang = new Date().getTime();
+
+  const hasil = (akunList || []).map((akun) => {
+    const logsAkun = grouped[akun.id] || [];
+
+    if (logsAkun.length === 0) {
+      return {
+        ...akun,
+        status: 'Offline' as const,
+        loginTerakhir: null,
+        jumlahDeviceHariIni: 0,
+      };
+    }
+
+    const loginTerakhir = logsAkun[0].waktu_login; // sudah terurut terbaru duluan
+    const deviceSet = new Set(
+      logsAkun.map((l) => l.device_id).filter(Boolean)
+    );
+    const menitSejakLogin =
+      (sekarang - new Date(loginTerakhir).getTime()) / 1000 / 60;
+
+    let status: 'Online' | 'Offline' | 'Multi-Device' = 'Offline';
+    if (deviceSet.size >= 2) {
+      status = 'Multi-Device';
+    } else if (menitSejakLogin <= BATAS_ONLINE_MENIT) {
+      status = 'Online';
+    }
+
+    return {
+      ...akun,
+      status,
+      loginTerakhir,
+      jumlahDeviceHariIni: deviceSet.size,
+    };
   });
 
-  return mencurigakan;
-}
+  // Urutkan: Multi-Device dulu (paling perlu perhatian), lalu Online, lalu Offline
+  const prioritas: Record<string, number> = {
+    'Multi-Device': 0,
+    Online: 1,
+    Offline: 2,
+  };
+  hasil.sort((a, b) => {
+    if (prioritas[a.status] !== prioritas[b.status])
+      return prioritas[a.status] - prioritas[b.status];
+    return a.nama_lengkap.localeCompare(b.nama_lengkap);
+  });
 
-function ringkasUserAgent(ua: string | null) {
-  if (!ua) return 'Tidak diketahui';
-  if (/android/i.test(ua)) return 'Android';
-  if (/iphone|ipad/i.test(ua)) return 'iOS';
-  if (/windows/i.test(ua)) return 'Windows';
-  if (/macintosh/i.test(ua)) return 'Mac';
-  return 'Lainnya';
+  setDataStatusLogin(hasil);
+  setLoadingStatusLogin(false);
 }
 
   async function hapusAkun(id: string, nama: string) {
@@ -5050,102 +5097,89 @@ function ringkasUserAgent(ua: string | null) {
 )}
 
 {activeMenu === 'Aktivitas Login' && (
-  <div className="max-w-6xl mx-auto pb-10">
+  <div className="max-w-4xl mx-auto pb-10">
     <div className="mb-6">
       <h2 className="text-2xl font-black text-slate-900">
         Aktivitas Login
       </h2>
       <p className="text-sm text-slate-500 font-bold mt-1">
-        Riwayat login petugas 30 hari terakhir. Petugas yang login dari 2
-        device berbeda di hari yang sama akan ditandai mencurigakan.
+        Status login tiap akun hari ini. "Online" berarti login dalam{' '}
+        {BATAS_ONLINE_MENIT} menit terakhir, "Multi-Device" berarti login
+        dari 2 atau lebih perangkat berbeda hari ini.
       </p>
     </div>
 
-    {loadingLogLogin ? (
+    {loadingStatusLogin ? (
       <div className="flex justify-center py-20">
         <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
       </div>
-    ) : dataLogLogin.length === 0 ? (
+    ) : dataStatusLogin.length === 0 ? (
       <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
-        Belum ada data login dalam 30 hari terakhir.
+        Belum ada data akun.
       </div>
     ) : (
-      (() => {
-        const mencurigakan = deteksiLoginMencurigakan(dataLogLogin);
+      <div className="space-y-3">
+        {dataStatusLogin.map((akun) => {
+          const gaya: Record<string, { badge: string; dot: string }> = {
+            Online: {
+              badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+              dot: 'bg-emerald-500',
+            },
+            Offline: {
+              badge: 'bg-slate-100 text-slate-500 border-slate-200',
+              dot: 'bg-slate-400',
+            },
+            'Multi-Device': {
+              badge: 'bg-red-50 text-red-700 border-red-200',
+              dot: 'bg-red-500 animate-pulse',
+            },
+          };
+          const g = gaya[akun.status];
 
-        return (
-          <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
-                    Nama Petugas
-                  </th>
-                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
-                    Waktu Login
-                  </th>
-                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
-                    Perangkat
-                  </th>
-                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
-                    Device ID
-                  </th>
-                  <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {dataLogLogin.map((log) => {
-                  const tanggal = new Date(log.waktu_login).toLocaleDateString('id-ID');
-                  const key = `${log.petugas_id}|${tanggal}`;
-                  const isMencurigakan = mencurigakan.has(key);
-
-                  return (
-                    <tr
-                      key={log.id}
-                      className={`border-b border-slate-100 hover:bg-slate-50 ${
-                        isMencurigakan ? 'bg-red-50/60' : ''
-                      }`}
-                    >
-                      <td className="p-4 font-bold uppercase">
-                        {log.nama_petugas || '-'}
-                      </td>
-                      <td className="p-4 text-xs">
-                        {new Date(log.waktu_login).toLocaleString('id-ID', {
-                          dateStyle: 'medium',
-                          timeStyle: 'short',
-                        })}
-                      </td>
-                      <td className="p-4">
-                        <span className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-200 rounded text-[10px] font-black uppercase">
-                          {ringkasUserAgent(log.user_agent)}
-                        </span>
-                      </td>
-                      <td className="p-4 font-mono text-[10px] text-slate-400">
-                        {log.device_id
-                          ? log.device_id.slice(0, 14) + '...'
-                          : '-'}
-                      </td>
-                      <td className="p-4">
-                        {isMencurigakan ? (
-                          <span className="px-2.5 py-1 bg-red-100 text-red-700 border border-red-200 rounded text-[10px] font-black uppercase whitespace-nowrap">
-                            ⚠️ Multi-Device
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded text-[10px] font-black uppercase">
-                            Normal
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        );
-      })()
+          return (
+            <div
+              key={akun.id}
+              className={`bg-white p-4 md:p-5 rounded-2xl border shadow-sm flex flex-wrap items-center justify-between gap-3 ${
+                akun.status === 'Multi-Device'
+                  ? 'border-red-200'
+                  : 'border-slate-200'
+              }`}
+            >
+              <div>
+                <p className="font-black text-slate-800">
+                  {akun.nama_lengkap}
+                </p>
+                <p className="text-xs font-bold text-slate-400">
+                  @{akun.username} · {akun.role}
+                </p>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">
+                    Login Terakhir
+                  </p>
+                  <p className="text-xs font-bold text-slate-600">
+                    {akun.loginTerakhir
+                      ? new Date(akun.loginTerakhir).toLocaleTimeString(
+                          'id-ID',
+                          { hour: '2-digit', minute: '2-digit' }
+                        )
+                      : 'Belum login hari ini'}
+                  </p>
+                </div>
+                <span
+                  className={`px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-wide border flex items-center gap-1.5 whitespace-nowrap ${g.badge}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${g.dot}`}></span>
+                  {akun.status}
+                  {akun.status === 'Multi-Device' &&
+                    ` (${akun.jumlahDeviceHariIni} device)`}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     )}
   </div>
 )}
