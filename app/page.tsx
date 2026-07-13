@@ -382,6 +382,8 @@ export default function Home() {
   // --- STATE TAMBAH PEMILIH BARU ---
   const [modalPemilihBaru, setModalPemilihBaru] = useState<any | null>(null);
   const [loadingPemilihBaru, setLoadingPemilihBaru] = useState(false);
+  const [modalEditPemilihBaru, setModalEditPemilihBaru] = useState<any | null>(null);
+  const [loadingEditPemilihBaru, setLoadingEditPemilihBaru] = useState(false);
 
   // --- STATE AKTIVITAS LOGIN ---
   const [dataLogLogin, setDataLogLogin] = useState<any[]>([]);
@@ -2476,6 +2478,70 @@ function exportTMSToCSV() {
       fetchStatistikCoklit();
     }
   }
+
+function bukaEditPemilihBaru(item: any) {
+  setModalEditPemilihBaru({
+    id: item.id,
+    NAMA: item.NAMA || '',
+    NIK: item.NIK?.startsWith('SEMENTARA') ? '' : item.NIK || '',
+    NKK: item.NKK || '',
+    ALAMAT: item.ALAMAT || '',
+    DUSUN: item.DUSUN || '',
+    RT: item.RT || '001',
+    RW: item.RW || '001',
+    TPS: item.TPS || '',
+    TANGGAL_LAHIR: item.TANGGAL_LAHIR || '',
+    KELAMIN: item.KELAMIN || 'L',
+    alasan_tambahan: parseAlasanTambahan(item.keterangan_koreksi) !== '-'
+      ? parseAlasanTambahan(item.keterangan_koreksi)
+      : '',
+    keterangan_koreksi_asli: item.keterangan_koreksi,
+  });
+}
+
+async function simpanEditPemilihBaru(e: React.FormEvent) {
+  e.preventDefault();
+  if (!modalEditPemilihBaru) return;
+
+  setLoadingEditPemilihBaru(true);
+
+  const nikFinal = modalEditPemilihBaru.NIK?.trim()
+    ? modalEditPemilihBaru.NIK.trim()
+    : `SEMENTARA-${Date.now()}`;
+
+  // Pertahankan info "ditambahkan oleh siapa" yang asli, cuma catatan diperbarui
+  const ditambahkanOleh = parseDitambahkanOleh(modalEditPemilihBaru.keterangan_koreksi_asli);
+  const keteranganBaru = `PEMILIH BARU (${modalEditPemilihBaru.alasan_tambahan}) - ditambahkan oleh ${
+    ditambahkanOleh !== '-' ? ditambahkanOleh : user.nama_lengkap
+  } | DIEDIT oleh ${user.nama_lengkap} pada ${new Date().toLocaleDateString('id-ID')}`;
+
+  const { error } = await supabase
+    .from('penduduk')
+    .update({
+      NAMA: modalEditPemilihBaru.NAMA,
+      NIK: nikFinal,
+      NKK: modalEditPemilihBaru.NKK,
+      ALAMAT: modalEditPemilihBaru.ALAMAT,
+      DUSUN: modalEditPemilihBaru.DUSUN,
+      RT: modalEditPemilihBaru.RT,
+      RW: modalEditPemilihBaru.RW,
+      TPS: modalEditPemilihBaru.TPS,
+      TANGGAL_LAHIR: modalEditPemilihBaru.TANGGAL_LAHIR || null,
+      KELAMIN: modalEditPemilihBaru.KELAMIN,
+      keterangan_koreksi: keteranganBaru,
+    })
+    .eq('id', modalEditPemilihBaru.id);
+
+  setLoadingEditPemilihBaru(false);
+
+  if (error) {
+    alert('Gagal menyimpan perubahan: ' + error.message);
+  } else {
+    setModalEditPemilihBaru(null);
+    fetchPemilihBaruVerifikasi();
+  }
+}
+
   // ==========================================
   // FUNGSI LOGIN & LOGOUT
   // ==========================================
@@ -3953,7 +4019,13 @@ function ringkasUserAgent(ua: string | null) {
                           </p>
                         </div>
 
-                        <div className="flex gap-3">
+                          <div className="flex gap-3">
+                          <button
+                            onClick={() => bukaEditPemilihBaru(item)}
+                            className="px-6 py-3 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-xl transition-colors border border-slate-200"
+                          >
+                            Edit
+                          </button>
                           <button
                             onClick={() => approvePemilihBaru(item)}
                             className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-sm transition-all"
@@ -6339,6 +6411,203 @@ function ringkasUserAgent(ua: string | null) {
           </div>
         </div>
       )}
+
+          {modalEditPemilihBaru && (
+  <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-indigo-600 p-5 flex justify-between items-center">
+        <h2 className="text-lg font-black text-white flex items-center gap-2">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+          </svg>
+          Edit Data Pemilih Baru
+        </h2>
+        <button
+          onClick={() => setModalEditPemilihBaru(null)}
+          className="text-white/80 hover:text-white bg-indigo-700 rounded-full p-1"
+        >
+          &times;
+        </button>
+      </div>
+
+      <form onSubmit={simpanEditPemilihBaru} className="flex flex-col flex-1 overflow-hidden">
+        <div className="p-6 overflow-y-auto flex-1 space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">
+              Alasan Penambahan
+            </label>
+            <select
+              required
+              value={modalEditPemilihBaru.alasan_tambahan}
+              onChange={(e) =>
+                setModalEditPemilihBaru({
+                  ...modalEditPemilihBaru,
+                  alasan_tambahan: e.target.value,
+                })
+              }
+              className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+            >
+              <option value="">-- Pilih Alasan --</option>
+              <option value="Pemilih Pemula">Pemilih Pemula (Baru 17 Tahun / Sudah Menikah)</option>
+              <option value="Pindahan">Pindahan Domisili</option>
+              <option value="Purnawirawan TNI/Polri">Purnawirawan TNI/Polri</option>
+              <option value="Terlewat Pendataan">Terlewat Pendataan Awal</option>
+              <option value="Lainnya">Lainnya</option>
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-slate-500 mb-1">Nama Lengkap</label>
+              <input
+                required
+                type="text"
+                value={modalEditPemilihBaru.NAMA}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, NAMA: e.target.value.toUpperCase() })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">NIK</label>
+              <input
+                type="text"
+                value={modalEditPemilihBaru.NIK}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, NIK: e.target.value })
+                }
+                placeholder="Kosongkan jika belum terbit"
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              />
+              <p className="text-[10px] font-bold text-slate-400 mt-1">
+                Jika kosong, sistem akan buat NIK sementara.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">NKK</label>
+              <input
+                type="text"
+                value={modalEditPemilihBaru.NKK}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, NKK: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Tanggal Lahir</label>
+              <input
+                type="date"
+                value={modalEditPemilihBaru.TANGGAL_LAHIR}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, TANGGAL_LAHIR: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Jenis Kelamin</label>
+              <select
+                value={modalEditPemilihBaru.KELAMIN}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, KELAMIN: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              >
+                <option value="L">Laki-laki</option>
+                <option value="P">Perempuan</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-slate-500 mb-1">Alamat</label>
+              <input
+                required
+                type="text"
+                value={modalEditPemilihBaru.ALAMAT}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, ALAMAT: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Dusun</label>
+              <select
+                value={modalEditPemilihBaru.DUSUN}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, DUSUN: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500 cursor-pointer"
+              >
+                <option value="">-- Pilih Dusun --</option>
+                {DAFTAR_DUSUN.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">TPS</label>
+              <input
+                type="text"
+                value={modalEditPemilihBaru.TPS}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, TPS: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">RT</label>
+              <select
+                value={modalEditPemilihBaru.RT}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, RT: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              >
+                {DAFTAR_RT.map((rt) => (
+                  <option key={rt} value={rt}>RT {rt}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">RW</label>
+              <select
+                value={modalEditPemilihBaru.RW}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, RW: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              >
+                {DAFTAR_RW.map((rw) => (
+                  <option key={rw} value={rw}>RW {rw}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => setModalEditPemilihBaru(null)}
+            className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-100"
+          >
+            Batal
+          </button>
+          <button
+            type="submit"
+            disabled={loadingEditPemilihBaru}
+            className="px-6 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-md flex items-center gap-2"
+          >
+            {loadingEditPemilihBaru ? 'Menyimpan...' : 'Simpan Perubahan'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
 
       {modalEditCoklit && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
