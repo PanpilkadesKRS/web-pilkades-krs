@@ -284,6 +284,8 @@ export default function Home() {
   const [loadingPemilihBaruList, setLoadingPemilihBaruList] = useState(false);
   const [countKoreksi, setCountKoreksi] = useState(0);
   const [countPemilihBaru, setCountPemilihBaru] = useState(0);
+  const [selectedPemilihBaru, setSelectedPemilihBaru] = useState<string[]>([]);
+  const [loadingSetujuiMassal, setLoadingSetujuiMassal] = useState(false);
   const [modalKoreksiEdit, setModalKoreksiEdit] = useState<any | null>(null);
   const [modalAksiSetelahEdit, setModalAksiSetelahEdit] = useState<any | null>(
     null
@@ -653,10 +655,10 @@ export default function Home() {
     ).or('status_coklit.is.null,status_coklit.eq.Belum Coklit');
     const { count: lakiLaki } = await baseFilter(
       supabase.from('penduduk').select('*', { count: 'exact', head: true })
-    ).eq('JENIS_KELAMIN', 'L');
+    ).eq('KELAMIN', 'L');
     const { count: perempuan } = await baseFilter(
       supabase.from('penduduk').select('*', { count: 'exact', head: true })
-    ).eq('JENIS_KELAMIN', 'P');
+    ).eq('KELAMIN', 'P');
 
     setStats({
       total: total || 0,
@@ -1332,6 +1334,96 @@ export default function Home() {
       fetchBadgeCounts();
       fetchStatistikCoklit();
     }
+  }
+
+  // Hanya data yang NIK-nya sudah e-KTP asli (bukan kosong/SEMENTARA)
+  // yang boleh ikut disetujui secara massal. Yang belum lengkap
+  // tetap harus diklik manual satu-satu.
+  function bisaDisetujuiMassal(item: any) {
+    return item.NIK && !item.NIK.startsWith('SEMENTARA');
+  }
+
+  function toggleSelectPemilihBaru(id: string) {
+    setSelectedPemilihBaru((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  function toggleSelectAllPemilihBaru() {
+    const idYangBisa = dataPemilihBaru
+      .filter(bisaDisetujuiMassal)
+      .map((item) => item.id);
+    const semuaTerpilih =
+      idYangBisa.length > 0 &&
+      idYangBisa.every((id) => selectedPemilihBaru.includes(id));
+    setSelectedPemilihBaru(semuaTerpilih ? [] : idYangBisa);
+  }
+
+  async function setujuiPemilihBaruMassal() {
+    if (selectedPemilihBaru.length === 0) {
+      alert('Pilih minimal 1 data untuk disetujui.');
+      return;
+    }
+
+    if (
+      !confirm(
+        `Setujui ${selectedPemilihBaru.length} data terpilih sebagai pemilih baru yang valid?`
+      )
+    )
+      return;
+
+    setLoadingSetujuiMassal(true);
+
+    const itemsToProcess = dataPemilihBaru.filter((item) =>
+      selectedPemilihBaru.includes(item.id)
+    );
+
+    let berhasil = 0;
+    const dilewati: string[] = [];
+
+    for (const item of itemsToProcess) {
+      const { data: duplikat } = await supabase
+        .from('penduduk')
+        .select('id, NAMA')
+        .eq('NIK', item.NIK)
+        .neq('id', item.id);
+
+      if (duplikat && duplikat.length > 0) {
+        dilewati.push(`${item.NAMA} (NIK duplikat)`);
+        continue;
+      }
+
+      const { error } = await supabase
+        .from('penduduk')
+        .update({
+          status_coklit: 'Ditemui',
+          keterangan_koreksi: `${item.keterangan_koreksi} | DIVERIFIKASI oleh ${
+            user.nama_lengkap
+          } pada ${new Date().toLocaleDateString('id-ID')}`,
+        })
+        .eq('id', item.id);
+
+      if (!error) {
+        berhasil += 1;
+      } else {
+        dilewati.push(`${item.NAMA} (gagal disimpan)`);
+      }
+    }
+
+    setLoadingSetujuiMassal(false);
+    setSelectedPemilihBaru([]);
+
+    let pesan = `${berhasil} data berhasil disetujui & masuk DPS.`;
+    if (dilewati.length > 0) {
+      pesan +=
+        `\n\n${dilewati.length} data dilewati:\n` +
+        dilewati.map((n) => `- ${n}`).join('\n');
+    }
+    alert(pesan);
+
+    fetchPemilihBaruVerifikasi();
+    fetchBadgeCounts();
+    fetchStatistikCoklit();
   }
 
   async function tolakPemilihBaru(item: any) {
@@ -2341,13 +2433,15 @@ function exportTMSToCSV() {
 
     const { error } = await supabase.from('penduduk').insert({
       NAMA: modalPemilihBaru.NAMA,
-      NIK: modalPemilihBaru.NIK,
+      NIK: nikFinal,
       NKK: modalPemilihBaru.NKK,
       ALAMAT: modalPemilihBaru.ALAMAT,
       DUSUN: modalPemilihBaru.DUSUN,
       RT: modalPemilihBaru.RT,
       RW: modalPemilihBaru.RW,
       TPS: modalPemilihBaru.TPS,
+      TANGGAL_LAHIR: modalPemilihBaru.TANGGAL_LAHIR || null,
+      KELAMIN: modalPemilihBaru.JENIS_KELAMIN,
       status_coklit: 'Pemilih Baru - Perlu Verifikasi',
       keterangan_koreksi: `PEMILIH BARU (${modalPemilihBaru.alasan_tambahan}) - ditambahkan oleh ${user.nama_lengkap}`,
       sumber_data: 'Tambahan Petugas', // penanda ini bukan dari data awal
@@ -3740,11 +3834,59 @@ function ringkasUserAgent(ua: string | null) {
                   </div>
                 ) : (
                   <div className="space-y-4">
+                    <div className="flex flex-wrap justify-between items-center gap-3 bg-indigo-50 border border-indigo-200 text-indigo-700 p-4 rounded-xl text-sm font-bold shadow-sm">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={
+                            dataPemilihBaru.filter(bisaDisetujuiMassal).length > 0 &&
+                            dataPemilihBaru
+                              .filter(bisaDisetujuiMassal)
+                              .every((item) => selectedPemilihBaru.includes(item.id))
+                          }
+                          onChange={toggleSelectAllPemilihBaru}
+                          className="w-4 h-4 cursor-pointer"
+                        />
+                        Pilih Semua yang NIK-nya sudah lengkap
+                        {selectedPemilihBaru.length > 0 &&
+                          ` · ${selectedPemilihBaru.length} dipilih`}
+                      </label>
+                      <button
+                        onClick={setujuiPemilihBaruMassal}
+                        disabled={
+                          loadingSetujuiMassal || selectedPemilihBaru.length === 0
+                        }
+                        className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-black hover:bg-emerald-700 transition-all disabled:opacity-50"
+                      >
+                        {loadingSetujuiMassal
+                          ? 'Memproses...'
+                          : `✓ Setujui Terpilih (${selectedPemilihBaru.length})`}
+                      </button>
+                    </div>
+
                     {dataPemilihBaru.map((item) => (
                       <div
                         key={item.id}
                         className="bg-white p-6 rounded-2xl border-l-4 border-indigo-500 border shadow-sm"
                       >
+                        {bisaDisetujuiMassal(item) && (
+                          <label className="flex items-center gap-2 mb-3 cursor-pointer w-fit">
+                            <input
+                              type="checkbox"
+                              checked={selectedPemilihBaru.includes(item.id)}
+                              onChange={() => toggleSelectPemilihBaru(item.id)}
+                              className="w-4 h-4 cursor-pointer"
+                            />
+                            <span className="text-[10px] font-black text-slate-400 uppercase">
+                              Pilih untuk approve massal
+                            </span>
+                          </label>
+                        )}
+                        {(!item.NIK || item.NIK.startsWith('SEMENTARA')) && (
+                          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wide flex items-center gap-2">
+                            ⚠️ Perlu Penambahan NIK — petugas belum mengisi e-KTP asli
+                          </div>
+                        )}
                         <div className="flex justify-between items-start mb-4">
                           <div>
                             <h3 className="font-black text-lg uppercase">
@@ -3763,6 +3905,19 @@ function ringkasUserAgent(ua: string | null) {
                             <p className="text-xs font-bold text-slate-500">
                               {item.ALAMAT}, Dusun {item.DUSUN}, RT {item.RT}/RW{' '}
                               {item.RW} · TPS {item.TPS}
+                            </p>
+                            <p className="text-xs font-bold text-slate-500 mt-1">
+                              NKK: {item.NKK || '-'} · Tgl Lahir:{' '}
+                              {item.TANGGAL_LAHIR
+                                ? new Date(item.TANGGAL_LAHIR).toLocaleDateString('id-ID')
+                                : '-'}
+                              {hitungUmurHariH(item.TANGGAL_LAHIR) !== null &&
+                                ` (${hitungUmurHariH(item.TANGGAL_LAHIR)} tahun)`}{' '}
+                              · {item.KELAMIN === 'P'
+                                ? 'Perempuan'
+                                : item.KELAMIN === 'L'
+                                ? 'Laki-laki'
+                                : '-'}
                             </p>
                           </div>
                           <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-[10px] font-black uppercase whitespace-nowrap">
@@ -6032,7 +6187,7 @@ function ringkasUserAgent(ua: string | null) {
                       Jenis Kelamin
                     </label>
                     <select
-                      value={modalPemilihBaru.JENIS_KELAMIN}
+                      value={modalPemilihBaru.KELAMIN}
                       onChange={(e) =>
                         setModalPemilihBaru({
                           ...modalPemilihBaru,
