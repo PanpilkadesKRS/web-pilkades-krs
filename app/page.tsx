@@ -1024,6 +1024,8 @@ export default function Home() {
       NAMA: modalAksiSetelahEdit.NAMA,
       NIK: modalAksiSetelahEdit.NIK,
       NKK: modalAksiSetelahEdit.NKK,
+      TEMPAT_LAHIR: modalAksiSetelahEdit.TEMPAT_LAHIR || null,
+      TANGGAL_LAHIR: modalAksiSetelahEdit.TANGGAL_LAHIR || null,
       ALAMAT: modalAksiSetelahEdit.ALAMAT,
       DUSUN: modalAksiSetelahEdit.DUSUN,
       RT: modalAksiSetelahEdit.RT,
@@ -1231,6 +1233,8 @@ export default function Home() {
       NAMA: modalEditCoklit.NAMA,
       NIK: modalEditCoklit.NIK,
       NKK: modalEditCoklit.NKK,
+      TEMPAT_LAHIR: modalEditCoklit.TEMPAT_LAHIR || null,
+      TANGGAL_LAHIR: modalEditCoklit.TANGGAL_LAHIR || null,
       ALAMAT: modalEditCoklit.ALAMAT,
       DUSUN: modalEditCoklit.DUSUN,
       RT: modalEditCoklit.RT,
@@ -1888,6 +1892,7 @@ async function simpanEditDaftarPemilih(e: React.FormEvent) {
       NIK: modalEditDaftarPemilih.NIK,
       NKK: modalEditDaftarPemilih.NKK,
       TANGGAL_LAHIR: modalEditDaftarPemilih.TANGGAL_LAHIR,
+      TEMPAT_LAHIR: modalEditDaftarPemilih.TEMPAT_LAHIR || null,
       ALAMAT: modalEditDaftarPemilih.ALAMAT,
       DUSUN: modalEditDaftarPemilih.DUSUN,
       RT: modalEditDaftarPemilih.RT,
@@ -2440,6 +2445,7 @@ function exportTMSToCSV() {
       RW: user?.rw_assigned || '001',
       TPS: '',
       TANGGAL_LAHIR: '',
+      TEMPAT_LAHIR: '',
       JENIS_KELAMIN: 'L',
       alasan_tambahan: '', // misal: "Pemilih Pemula", "Pindahan", "Purnawirawan TNI/Polri", "Terlewat Pendataan"
     });
@@ -2465,6 +2471,7 @@ function exportTMSToCSV() {
       RW: modalPemilihBaru.RW,
       TPS: modalPemilihBaru.TPS,
       TANGGAL_LAHIR: modalPemilihBaru.TANGGAL_LAHIR || null,
+      TEMPAT_LAHIR: modalPemilihBaru.TEMPAT_LAHIR || null,
       KELAMIN: modalPemilihBaru.JENIS_KELAMIN,
       status_coklit: 'Pemilih Baru - Perlu Verifikasi',
       keterangan_koreksi: `PEMILIH BARU (${modalPemilihBaru.alasan_tambahan}) - ditambahkan oleh ${user.nama_lengkap}`,
@@ -2488,12 +2495,13 @@ function bukaEditPemilihBaru(item: any) {
     NAMA: item.NAMA || '',
     NIK: item.NIK?.startsWith('SEMENTARA') ? '' : item.NIK || '',
     NKK: item.NKK || '',
+    TEMPAT_LAHIR: item.TEMPAT_LAHIR || '',
+    TANGGAL_LAHIR: item.TANGGAL_LAHIR || '',
     ALAMAT: item.ALAMAT || '',
     DUSUN: item.DUSUN || '',
     RT: item.RT || '001',
     RW: item.RW || '001',
     TPS: item.TPS || '',
-    TANGGAL_LAHIR: item.TANGGAL_LAHIR || '',
     KELAMIN: item.KELAMIN || 'L',
     alasan_tambahan: parseAlasanTambahan(item.keterangan_koreksi) !== '-'
       ? parseAlasanTambahan(item.keterangan_koreksi)
@@ -2529,6 +2537,7 @@ async function simpanEditPemilihBaru(e: React.FormEvent) {
       RT: modalEditPemilihBaru.RT,
       RW: modalEditPemilihBaru.RW,
       TPS: modalEditPemilihBaru.TPS,
+      TEMPAT_LAHIR: modalEditPemilihBaru.TEMPAT_LAHIR || null,
       TANGGAL_LAHIR: modalEditPemilihBaru.TANGGAL_LAHIR || null,
       KELAMIN: modalEditPemilihBaru.KELAMIN,
       keterangan_koreksi: keteranganBaru,
@@ -6293,6 +6302,22 @@ async function fetchStatusLoginAkun() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Tempat Lahir
+                    </label>
+                    <input
+                      type="text"
+                      value={modalPemilihBaru.TEMPAT_LAHIR}
+                      onChange={(e) =>
+                        setModalPemilihBaru({
+                          ...modalPemilihBaru,
+                          TEMPAT_LAHIR: e.target.value,
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
                       Tanggal Lahir
                     </label>
                     <input
@@ -6530,6 +6555,17 @@ async function fetchStatusLoginAkun() {
               />
             </div>
             <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Tempat Lahir</label>
+              <input
+                type="text"
+                value={modalEditPemilihBaru.TEMPAT_LAHIR}
+                onChange={(e) =>
+                  setModalEditPemilihBaru({ ...modalEditPemilihBaru, TEMPAT_LAHIR: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Tanggal Lahir</label>
               <input
                 type="date"
@@ -6708,6 +6744,38 @@ async function fetchStatusLoginAkun() {
                         setModalEditCoklit({
                           ...modalEditCoklit,
                           NKK: e.target.value,
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Tempat Lahir
+                    </label>
+                    <input
+                      type="text"
+                      value={modalEditCoklit.TEMPAT_LAHIR || ''}
+                      onChange={(e) =>
+                        setModalEditCoklit({
+                          ...modalEditCoklit,
+                          TEMPAT_LAHIR: e.target.value.toUpperCase(),
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Tanggal Lahir
+                    </label>
+                    <input
+                      type="date"
+                      value={modalEditCoklit.TANGGAL_LAHIR || ''}
+                      onChange={(e) =>
+                        setModalEditCoklit({
+                          ...modalEditCoklit,
+                          TANGGAL_LAHIR: e.target.value,
                         })
                       }
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
@@ -6983,6 +7051,38 @@ async function fetchStatusLoginAkun() {
                         setModalKoreksiEdit({
                           ...modalKoreksiEdit,
                           NKK: e.target.value,
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+                    />
+                  </div>
+                      <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Tempat Lahir
+                    </label>
+                    <input
+                      type="text"
+                      value={modalKoreksiEdit.TEMPAT_LAHIR || ''}
+                      onChange={(e) =>
+                        setModalKoreksiEdit({
+                          ...modalKoreksiEdit,
+                          TEMPAT_LAHIR: e.target.value.toUpperCase(),
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Tanggal Lahir
+                    </label>
+                    <input
+                      type="date"
+                      value={modalKoreksiEdit.TANGGAL_LAHIR || ''}
+                      onChange={(e) =>
+                        setModalKoreksiEdit({
+                          ...modalKoreksiEdit,
+                          TANGGAL_LAHIR: e.target.value,
                         })
                       }
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
@@ -7265,6 +7365,22 @@ async function fetchStatusLoginAkun() {
                         setModalEditDaftarPemilih({
                           ...modalEditDaftarPemilih,
                           TANGGAL_LAHIR: e.target.value,
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Tempat Lahir
+                    </label>
+                    <input
+                      type="text"
+                      value={modalEditDaftarPemilih.TEMPAT_LAHIR || ''}
+                      onChange={(e) =>
+                        setModalEditDaftarPemilih({
+                          ...modalEditDaftarPemilih,
+                          TEMPAT_LAHIR: e.target.value.toUpperCase(),
                         })
                       }
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
