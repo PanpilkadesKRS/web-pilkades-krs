@@ -1539,6 +1539,7 @@ export default function Home() {
       'NKK',
       'Tanggal Lahir',
       'Umur Hari H',
+      'Tempat Lahir',
       'Alamat',
       'Dusun',
       'RT',
@@ -1558,9 +1559,10 @@ export default function Home() {
       hitungUmurHariH(item.TANGGAL_LAHIR) !== null
         ? `${hitungUmurHariH(item.TANGGAL_LAHIR)} tahun`
         : '-',
+      item.TEMPAT_LAHIR || '-',
       item.ALAMAT || '-',
       item.DUSUN || '-',
-      item.RT,
+      item.RT,  
       item.RW,
       item.TPS,
       item.ragam_disabilitas || '-',
