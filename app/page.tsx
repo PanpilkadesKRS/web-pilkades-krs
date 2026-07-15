@@ -368,6 +368,15 @@ export default function Home() {
   const [filterRW_TMS, setFilterRW_TMS] = useState('Semua');
   const [loadingBatalkanTMS, setLoadingBatalkanTMS] = useState<string | null>(null);  
 
+  // --- STATE TMS: TAB & DATA BERMASALAH (NIK Ganda / Belum Lengkap) ---
+  const [tabTMS, setTabTMS] = useState<'Asli' | 'Bermasalah'>('Asli');
+  const [dataBermasalahTMS, setDataBermasalahTMS] = useState<any[]>([]);
+  const [loadingBermasalahTMS, setLoadingBermasalahTMS] = useState(false);
+  const [modalPerbaikiBermasalah, setModalPerbaikiBermasalah] = useState<any | null>(null);
+  const [loadingSimpanPerbaikiBermasalah, setLoadingSimpanPerbaikiBermasalah] = useState(false);
+  const [searchBermasalahTMS, setSearchBermasalahTMS] = useState('');
+  const [filterAlasanBermasalahTMS, setFilterAlasanBermasalahTMS] = useState('Semua');
+
   // --- STATE DPT/TAMBAHAN ---
   const [dataDPTTambahan, setDataDPTTambahan] = useState<any[]>([]);
   const [loadingDPTTambahan, setLoadingDPTTambahan] = useState(false);
@@ -514,6 +523,12 @@ export default function Home() {
       supabase.removeChannel(channel);
     };
   }, [activeMenu]);
+
+useEffect(() => {
+    if (activeMenu === 'TMS' && tabTMS === 'Bermasalah') {
+      fetchDataBermasalahTMS();
+    }
+  }, [activeMenu, tabTMS]);
 
   useEffect(() => {
     if (activeMenu !== 'DPT/Tambahan') return;
@@ -2154,6 +2169,200 @@ function exportTMSToCSV() {
   link.click();
   URL.revokeObjectURL(url);
 }
+
+function lihatDiDaftarPemilih(item: any) {
+  const kataKunci = item.NIK && !item.NIK.startsWith('SEMENTARA') ? item.NIK : item.NAMA;
+  setActiveMenu('Daftar Pemilih');
+  setSearchDaftarPemilih(kataKunci || '');
+}
+
+function bukaPerbaikiBermasalah(item: any) {
+  setModalPerbaikiBermasalah({ ...item });
+}
+
+async function simpanPerbaikiBermasalah(e: React.FormEvent) {
+  e.preventDefault();
+  if (!modalPerbaikiBermasalah) return;
+
+  const nikBaru = modalPerbaikiBermasalah.NIK?.trim();
+
+  if (!nikBaru || nikBaru.startsWith('SEMENTARA')) {
+    alert('NIK wajib diisi dengan NIK e-KTP asli (bukan sementara) sebelum data ini bisa dikirim ke DPS.');
+    return;
+  }
+
+  const fieldKosong = FIELD_WAJIB_IDENTITAS.filter((f) => !modalPerbaikiBermasalah[f]);
+  if (fieldKosong.length > 0) {
+    alert('Lengkapi dulu field berikut:\n' + fieldKosong.map((f) => `- ${LABEL_FIELD_WAJIB[f]}`).join('\n'));
+    return;
+  }
+
+  setLoadingSimpanPerbaikiBermasalah(true);
+
+  // Cek ulang NIK ganda ke SELURUH tabel (real-time), exclude data ini sendiri
+  const { data: duplikat, error: errCek } = await supabase
+    .from('penduduk')
+    .select('id, NAMA')
+    .eq('NIK', nikBaru)
+    .neq('id', modalPerbaikiBermasalah.id);
+
+  if (errCek) {
+    setLoadingSimpanPerbaikiBermasalah(false);
+    alert('Gagal mengecek NIK: ' + errCek.message);
+    return;
+  }
+
+  if (duplikat && duplikat.length > 0) {
+    setLoadingSimpanPerbaikiBermasalah(false);
+    alert(
+      `NIK ${nikBaru} masih dipakai oleh data lain:\n\n` +
+        duplikat.map((d) => `- ${d.NAMA}`).join('\n') +
+        `\n\nPerbaiki dulu NIK-nya sebelum disimpan.`
+    );
+    return;
+  }
+
+  const { error } = await supabase
+    .from('penduduk')
+    .update({
+      NAMA: modalPerbaikiBermasalah.NAMA,
+      NIK: nikBaru,
+      NKK: modalPerbaikiBermasalah.NKK,
+      TANGGAL_LAHIR: modalPerbaikiBermasalah.TANGGAL_LAHIR,
+      TEMPAT_LAHIR: modalPerbaikiBermasalah.TEMPAT_LAHIR,
+      KELAMIN: modalPerbaikiBermasalah.KELAMIN,
+      ALAMAT: modalPerbaikiBermasalah.ALAMAT,
+      DUSUN: modalPerbaikiBermasalah.DUSUN,
+      RT: modalPerbaikiBermasalah.RT,
+      RW: modalPerbaikiBermasalah.RW,
+      TPS: modalPerbaikiBermasalah.TPS || null,
+      status_coklit: 'Ditemui',
+      divalidasi_admin: true,
+      tanggal_validasi: new Date().toISOString(),
+      divalidasi_oleh: user.nama_lengkap,
+    })
+    .eq('id', modalPerbaikiBermasalah.id);
+
+  setLoadingSimpanPerbaikiBermasalah(false);
+
+  if (error) {
+    alert('Gagal menyimpan perbaikan: ' + error.message);
+  } else {
+    setModalPerbaikiBermasalah(null);
+    fetchDataBermasalahTMS();
+  }
+}
+
+  // ==========================================
+// FUNGSI DATA BERMASALAH TMS (NIK GANDA / BELUM LENGKAP)
+// ==========================================
+const FIELD_WAJIB_IDENTITAS = ['TANGGAL_LAHIR', 'TEMPAT_LAHIR', 'NKK', 'KELAMIN', 'ALAMAT', 'DUSUN', 'RT', 'RW'];
+const LABEL_FIELD_WAJIB: Record<string, string> = {
+  TANGGAL_LAHIR: 'Tanggal Lahir',
+  TEMPAT_LAHIR: 'Tempat Lahir',
+  NKK: 'NKK',
+  KELAMIN: 'Jenis Kelamin',
+  ALAMAT: 'Alamat',
+  DUSUN: 'Dusun',
+  RT: 'RT',
+  RW: 'RW',
+};
+
+async function fetchDataBermasalahTMS() {
+  setLoadingBermasalahTMS(true);
+
+  // Helper ambil semua baris dengan paginasi (Supabase max 1000/request)
+  async function ambilSemua(kolom: string) {
+    let hasil: any[] = [];
+    let dariBaris = 0;
+    const ukuranHalaman = 1000;
+    while (true) {
+      let q = supabase.from('penduduk').select(kolom).range(dariBaris, dariBaris + ukuranHalaman - 1);
+      if (user?.role !== 'Super Admin') {
+        if (user?.rt_assigned) q = q.eq('RT', user.rt_assigned);
+        if (user?.rw_assigned) q = q.eq('RW', user.rw_assigned);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      hasil = hasil.concat(data);
+      if (data.length < ukuranHalaman) break;
+      dariBaris += ukuranHalaman;
+    }
+    return hasil;
+  }
+
+  try {
+    // 1. Ambil SEMUA NIK (termasuk yang udah TMS/DPT) buat deteksi ganda yang akurat
+    const semuaNIK = await ambilSemua('id, NIK');
+    const nikMap: Record<string, string[]> = {};
+    semuaNIK.forEach((item: any) => {
+      if (item.NIK && !item.NIK.startsWith('SEMENTARA')) {
+        if (!nikMap[item.NIK]) nikMap[item.NIK] = [];
+        nikMap[item.NIK].push(item.id);
+      }
+    });
+    const idNikGanda = new Set<string>();
+    Object.values(nikMap).forEach((ids) => {
+      if (ids.length > 1) ids.forEach((id) => idNikGanda.add(id));
+    });
+
+    // 2. Ambil kandidat data (kecuali yang udah TMS asli/Perlu Koreksi/Pemilih Baru/sudah DPT)
+    const kandidat = await ambilSemua(
+      'id, NAMA, NIK, NKK, TANGGAL_LAHIR, TEMPAT_LAHIR, KELAMIN, ALAMAT, DUSUN, RT, RW, TPS, status_coklit, status_dpt'
+    );
+
+    const statusDikecualikan = [
+      'Pindah',
+      'Meninggal',
+      'Tidak Dikenal',
+      'Perlu Koreksi',
+      'Pemilih Baru - Perlu Verifikasi',
+    ];
+
+    const hasil = kandidat
+      .filter(
+        (item: any) =>
+          !statusDikecualikan.includes(item.status_coklit) && item.status_dpt !== 'DPT'
+      )
+      .map((item: any) => {
+        const alasan: string[] = [];
+        if (idNikGanda.has(item.id)) alasan.push('NIK Ganda');
+
+        const nikBelumLengkap = !item.NIK || item.NIK.startsWith('SEMENTARA');
+        const adaFieldKosong = FIELD_WAJIB_IDENTITAS.some((f) => !item[f]);
+        if (nikBelumLengkap || adaFieldKosong) alasan.push('Data Belum Lengkap');
+
+        return { ...item, alasanBermasalah: alasan };
+      })
+      .filter((item: any) => item.alasanBermasalah.length > 0);
+
+    hasil.sort((a: any, b: any) => (a.NAMA || '').localeCompare(b.NAMA || ''));
+
+    setDataBermasalahTMS(hasil);
+  } catch (err: any) {
+    console.error('Error Supabase (Data Bermasalah TMS):', err);
+    alert('Error saat mengambil data bermasalah: ' + err.message);
+  }
+
+  setLoadingBermasalahTMS(false);
+}
+
+const dataBermasalahTMSFiltered = useMemo(() => {
+  return dataBermasalahTMS.filter((item) => {
+    const matchAlasan =
+      filterAlasanBermasalahTMS === 'Semua' ||
+      item.alasanBermasalah?.includes(filterAlasanBermasalahTMS);
+
+    const q = searchBermasalahTMS.trim().toLowerCase();
+    const matchSearch =
+      !q ||
+      item.NAMA?.toLowerCase().includes(q) ||
+      item.NIK?.toLowerCase().includes(q);
+
+    return matchAlasan && matchSearch;
+  });
+}, [dataBermasalahTMS, filterAlasanBermasalahTMS, searchBermasalahTMS]);
 
     // ==========================================
   // FUNGSI DPT/TAMBAHAN (REKAP HASIL TEMUAN LAPANGAN)
@@ -4248,13 +4457,28 @@ async function fetchStatusLoginAkun() {
                           NIK
                         </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          NKK
+                        </th> 
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           Tanggal Lahir
                         </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           Umur Hari H
                         </th>
+                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          Tempat Lahir
+                        </th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          Alamat
+                        </th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          Dusun
+                        </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           RT/RW
+                        </th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
+                          TPS
                         </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           Disabilitas
@@ -4264,7 +4488,7 @@ async function fetchStatusLoginAkun() {
                         </th>
                       </tr>
                     </thead>
-                    <tbody>
+                   <tbody>
                       {dataDPSFiltered.map((item) => (
                         <tr
                           key={item.id}
@@ -4286,6 +4510,7 @@ async function fetchStatusLoginAkun() {
                             {item.NAMA}
                           </td>
                           <td className="p-4 font-mono">{item.NIK}</td>
+                          <td className="p-4 font-mono">{item.NKK || '-'}</td>
                           <td className="p-4 text-xs">
                             {item.TANGGAL_LAHIR
                               ? new Date(item.TANGGAL_LAHIR).toLocaleDateString('id-ID')
@@ -4296,9 +4521,13 @@ async function fetchStatusLoginAkun() {
                               ? `${hitungUmurHariH(item.TANGGAL_LAHIR)} tahun`
                               : '-'}
                           </td>
+                          <td className="p-4 text-xs">{item.TEMPAT_LAHIR || '-'}</td>
+                          <td className="p-4 uppercase text-xs">{item.ALAMAT || '-'}</td>
+                          <td className="p-4">{item.DUSUN || '-'}</td>
                           <td className="p-4">
                             {item.RT || '001'}/{item.RW || '001'}
                           </td>
+                          <td className="p-4">{item.TPS || '-'}</td>
                           <td className="p-4">
                             {item.ragam_disabilitas ? (
                               <span className="px-2 py-1 bg-purple-50 text-purple-700 border border-purple-100 rounded text-[10px] font-black uppercase">
@@ -4751,6 +4980,46 @@ async function fetchStatusLoginAkun() {
       </h2>
       <p className="text-sm text-slate-500 font-bold mt-1">
         Rekap warga yang dinyatakan Pindah, Meninggal, atau Tidak Dikenal
+        saat coklit, serta data yang bermasalah (NIK ganda / belum lengkap).
+      </p>
+    </div>
+
+    {/* TAB SWITCHER */}
+    <div className="flex gap-2 mb-6 border-b border-slate-200">
+      <button
+        onClick={() => setTabTMS('Asli')}
+        className={`px-5 py-3 font-black text-sm border-b-2 transition-all ${
+          tabTMS === 'Asli'
+            ? 'border-red-500 text-red-600'
+            : 'border-transparent text-slate-400 hover:text-slate-600'
+        }`}
+      >
+        TMS
+      </button>
+      <button
+        onClick={() => setTabTMS('Bermasalah')}
+        className={`px-5 py-3 font-black text-sm border-b-2 transition-all flex items-center gap-2 ${
+          tabTMS === 'Bermasalah'
+            ? 'border-orange-500 text-orange-600'
+            : 'border-transparent text-slate-400 hover:text-slate-600'
+        }`}
+      >
+        Data Bermasalah
+        {dataBermasalahTMS.length > 0 && (
+          <span className="bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+            {dataBermasalahTMS.length}
+          </span>
+        )}
+      </button>
+    </div>
+  {tabTMS === 'Asli' && (
+ <div className="max-w-6xl mx-auto pb-10">
+    <div className="mb-6">
+      <h2 className="text-2xl font-black text-slate-900">
+        TMS (Tidak Memenuhi Syarat)
+      </h2>
+      <p className="text-sm text-slate-500 font-bold mt-1">
+        Rekap warga yang dinyatakan Pindah, Meninggal, atau Tidak Dikenal
         saat coklit — otomatis mengikuti hasil terbaru dari lapangan.
       </p>
     </div>
@@ -4893,6 +5162,110 @@ async function fetchStatusLoginAkun() {
           </tbody>
         </table>
       </div>
+    )}
+    </div>
+  )}
+    {tabTMS === 'Bermasalah' && (
+  <>
+    {/* SEARCH & FILTER */}
+    <div className="flex flex-wrap gap-3 mb-4">
+      <input
+        type="text"
+        placeholder="Cari Nama atau NIK..."
+        value={searchBermasalahTMS}
+        onChange={(e) => setSearchBermasalahTMS(e.target.value)}
+        className="flex-1 min-w-[200px] p-3 border-2 border-slate-200 rounded-xl font-bold text-sm focus:border-orange-500 outline-none shadow-sm"
+      />
+      <div className="flex flex-wrap gap-2">
+        {[
+          { id: 'Semua', label: 'Semua' },
+          { id: 'NIK Ganda', label: 'NIK Ganda' },
+          { id: 'Data Belum Lengkap', label: 'Belum Lengkap' },
+        ].map((f) => (
+          <button
+            key={f.id}
+            onClick={() => setFilterAlasanBermasalahTMS(f.id)}
+            className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
+              filterAlasanBermasalahTMS === f.id
+                ? 'bg-orange-500 border-orange-500 text-white shadow-sm'
+                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+    </div>
+
+    <div className="bg-orange-50 border border-orange-200 text-orange-700 p-4 rounded-xl mb-6 text-sm font-bold shadow-sm">
+      Menampilkan {dataBermasalahTMSFiltered.length} dari {dataBermasalahTMS.length} data — NIK bentrok dengan warga lain, atau identitas belum lengkap.
+      Data ini bukan TMS asli, jadi tidak dihitung sebagai Pindah/Meninggal/Tidak Dikenal.
+    </div>
+
+    {loadingBermasalahTMS ? (
+      <div className="flex justify-center py-20">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-orange-500"></div>
+      </div>
+    ) : dataBermasalahTMSFiltered.length === 0 ? (
+      <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+        {dataBermasalahTMS.length === 0
+          ? 'Tidak ada data bermasalah saat ini. 🎉'
+          : 'Tidak ada data yang cocok dengan pencarian/filter.'}
+      </div>
+    ) : (
+      <div className="space-y-4">
+        {dataBermasalahTMSFiltered.map((item) => (
+              <div
+                key={item.id}
+                className="bg-white p-5 rounded-2xl border-l-4 border-orange-500 border shadow-sm"
+              >
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <h3 className="font-black text-lg uppercase">{item.NAMA || '(Nama Kosong)'}</h3>
+                    <p className="text-xs font-bold text-slate-500">
+                      NIK: {item.NIK?.startsWith('SEMENTARA') || !item.NIK ? (
+                        <span className="text-red-500">Belum ada e-KTP</span>
+                      ) : (
+                        item.NIK
+                      )}{' '}
+                      · RT {item.RT || '-'}/RW {item.RW || '-'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 justify-end">
+                    {item.alasanBermasalah.map((alasan: string) => (
+                      <span
+                        key={alasan}
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase whitespace-nowrap ${
+                          alasan === 'NIK Ganda'
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-orange-100 text-orange-700'
+                        }`}
+                      >
+                        {alasan}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-3 mt-4">
+                  <button
+                    onClick={() => lihatDiDaftarPemilih(item)}
+                    className="px-5 py-2.5 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-xl transition-colors border border-slate-200"
+                  >
+                    Lihat
+                  </button>
+                  <button
+                    onClick={() => bukaPerbaikiBermasalah(item)}
+                    className="flex-1 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm rounded-xl shadow-sm transition-all"
+                  >
+                    Perbaiki
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </>
     )}
   </div>
 )}
@@ -7283,7 +7656,193 @@ async function fetchStatusLoginAkun() {
           </div>
         </div>
       )}
-{/* ======================================================== */}
+
+      {modalPerbaikiBermasalah && (
+  <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-orange-500 p-5 flex justify-between items-center">
+        <h2 className="text-lg font-black text-white">Perbaiki Identitas Pemilih</h2>
+        <button
+          onClick={() => setModalPerbaikiBermasalah(null)}
+          className="text-white/80 hover:text-white bg-orange-600 rounded-full p-1"
+        >
+          &times;
+        </button>
+      </div>
+
+      <form onSubmit={simpanPerbaikiBermasalah} className="flex flex-col flex-1 overflow-hidden">
+        <div className="p-6 overflow-y-auto flex-1 space-y-4">
+          <div className="bg-orange-50 p-3 rounded-xl border border-orange-100 flex flex-wrap gap-1.5">
+            {modalPerbaikiBermasalah.alasanBermasalah?.map((alasan: string) => (
+              <span
+                key={alasan}
+                className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
+                  alasan === 'NIK Ganda' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
+                }`}
+              >
+                {alasan}
+              </span>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-slate-500 mb-1">Nama Lengkap</label>
+              <input
+                required
+                type="text"
+                value={modalPerbaikiBermasalah.NAMA || ''}
+                onChange={(e) =>
+                  setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, NAMA: e.target.value.toUpperCase() })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">NIK (wajib e-KTP asli)</label>
+              <input
+                required
+                type="text"
+                value={modalPerbaikiBermasalah.NIK?.startsWith('SEMENTARA') ? '' : modalPerbaikiBermasalah.NIK || ''}
+                onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, NIK: e.target.value })}
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">NKK</label>
+              <input
+                required
+                type="text"
+                value={modalPerbaikiBermasalah.NKK || ''}
+                onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, NKK: e.target.value })}
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Tempat Lahir</label>
+              <input
+                required
+                type="text"
+                value={modalPerbaikiBermasalah.TEMPAT_LAHIR || ''}
+                onChange={(e) =>
+                  setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, TEMPAT_LAHIR: e.target.value.toUpperCase() })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Tanggal Lahir</label>
+              <input
+                required
+                type="date"
+                value={modalPerbaikiBermasalah.TANGGAL_LAHIR || ''}
+                onChange={(e) =>
+                  setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, TANGGAL_LAHIR: e.target.value })
+                }
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Jenis Kelamin</label>
+              <select
+                required
+                value={modalPerbaikiBermasalah.KELAMIN || ''}
+                onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, KELAMIN: e.target.value })}
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+              >
+                <option value="">-- Pilih --</option>
+                <option value="L">Laki-laki</option>
+                <option value="P">Perempuan</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-slate-500 mb-1">Alamat</label>
+              <input
+                required
+                type="text"
+                value={modalPerbaikiBermasalah.ALAMAT || ''}
+                onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, ALAMAT: e.target.value })}
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Dusun</label>
+              <select
+                required
+                value={modalPerbaikiBermasalah.DUSUN || ''}
+                onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, DUSUN: e.target.value })}
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+              >
+                <option value="">-- Pilih Dusun --</option>
+                {DAFTAR_DUSUN.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">
+                TPS <span className="text-slate-300 normal-case">(opsional)</span>
+              </label>
+              <input
+                type="text"
+                value={modalPerbaikiBermasalah.TPS || ''}
+                onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, TPS: e.target.value })}
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">RT</label>
+              <select
+                required
+                value={modalPerbaikiBermasalah.RT || ''}
+                onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, RT: e.target.value })}
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+              >
+                <option value="">-- Pilih RT --</option>
+                {DAFTAR_RT.map((rt) => (
+                  <option key={rt} value={rt}>RT {rt}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">RW</label>
+              <select
+                required
+                value={modalPerbaikiBermasalah.RW || ''}
+                onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, RW: e.target.value })}
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+              >
+                <option value="">-- Pilih RW --</option>
+                {DAFTAR_RW.map((rw) => (
+                  <option key={rw} value={rw}>RW {rw}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => setModalPerbaikiBermasalah(null)}
+            className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-100"
+          >
+            Batal
+          </button>
+          <button
+            type="submit"
+            disabled={loadingSimpanPerbaikiBermasalah}
+            className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 shadow-md flex items-center gap-2"
+          >
+            {loadingSimpanPerbaikiBermasalah ? 'Menyimpan...' : '✓ Simpan & Kirim ke DPS'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
+
+      {/* ======================================================== */}
       {/* MODAL EDIT DAFTAR PEMILIH */}
       {/* ======================================================== */}
       {modalEditDaftarPemilih && (
