@@ -1746,6 +1746,8 @@ export default function Home() {
   let dariBaris = 0;
   const ukuranHalaman = 1000;
 
+  type GrupWilayah = { dusun: string; rt: string; rw: string; total: number; sudahDPS: number };
+
   try {
     while (true) {
       let q = supabase
@@ -1753,7 +1755,6 @@ export default function Home() {
         .select('DUSUN, RT, RW, status_coklit, divalidasi_admin')
         .range(dariBaris, dariBaris + ukuranHalaman - 1);
 
-      // Kalau Petugas Coklit, kunci ke RT/RW dia biar hematan query
       if (user?.role === 'Petugas Coklit') {
         if (user?.rt_assigned) q = q.eq('RT', user.rt_assigned);
         if (user?.rw_assigned) q = q.eq('RW', user.rw_assigned);
@@ -1768,38 +1769,32 @@ export default function Home() {
       dariBaris += ukuranHalaman;
     }
 
-    // Kelompokkan per Dusun + RT + RW
-    const grouped: Record<string, { total: number; sudahDPS: number }> = {};
+    const grouped: Record<string, GrupWilayah> = {};
 
     semuaData.forEach((item) => {
-      const dusun = item.DUSUN || '-';
+      const dusun = item.DUSUN || 'Tanpa Dusun';
       const rt = String(item.RT ?? '').padStart(3, '0');
       const rw = String(item.RW ?? '').padStart(3, '0');
 
       if (!DAFTAR_RT.includes(rt) || !DAFTAR_RW.includes(rw)) return;
 
-      const key = `${dusun}-${rt}-${rw}`;
-      if (!grouped[key]) grouped[key] = { total: 0, sudahDPS: 0 };
+      const key = `${dusun}###${rt}###${rw}`;
 
+      if (!grouped[key]) {
+        grouped[key] = { dusun, rt, rw, total: 0, sudahDPS: 0 };
+      }
       grouped[key].total += 1;
 
-      // "Sudah masuk DPS" = udah divalidasi admin & statusnya Ditemui
-      // (baik yang masih nangkring di DPS maupun yang udah lanjut ke DPT,
-      // karena keduanya sama-sama pernah lolos jadi DPS)
       if (item.status_coklit === 'Ditemui' && item.divalidasi_admin) {
         grouped[key].sudahDPS += 1;
       }
     });
 
-    const hasil = Object.keys(grouped).map((key) => {
-      const [dusun, rt, rw] = key.split('-');
-      const total = grouped[key].total;
-      const sudahDPS = grouped[key].sudahDPS;
-      const persen = total > 0 ? Math.round((sudahDPS / total) * 100) : 0;
-      return { dusun, rt, rw, total, sudahDPS, persen };
-    });
+    const hasil = Object.values(grouped).map((g) => ({
+      ...g,
+      persen: g.total > 0 ? Math.round((g.sudahDPS / g.total) * 100) : 0,
+    }));
 
-    // Urutkan dari yang persentasenya PALING RENDAH duluan (paling prioritas)
     hasil.sort((a, b) => a.persen - b.persen);
 
     setProgresDPSWilayah(hasil);
@@ -4483,7 +4478,7 @@ async function fetchStatusLoginAkun() {
                   </div>
                 )}
               </div>
-              
+
               {/* FILTER RT/RW */}
               <div className="flex flex-wrap gap-3 mb-4">
                 <select
