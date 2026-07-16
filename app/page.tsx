@@ -2434,11 +2434,17 @@ async function fetchDataBermasalahTMS() {
         const alasan: string[] = [];
         if (idNikGanda.has(item.id)) alasan.push('NIK Ganda');
 
+        // Kumpulkan field mana aja yang masih kosong, biar admin gak perlu nebak
+        const fieldKosongList: string[] = [];
         const nikBelumLengkap = !item.NIK || item.NIK.startsWith('SEMENTARA');
-        const adaFieldKosong = FIELD_WAJIB_IDENTITAS.some((f) => !item[f]);
-        if (nikBelumLengkap || adaFieldKosong) alasan.push('Data Belum Lengkap');
+        if (nikBelumLengkap) fieldKosongList.push('NIK');
+        FIELD_WAJIB_IDENTITAS.forEach((f) => {
+          if (!item[f]) fieldKosongList.push(LABEL_FIELD_WAJIB[f]);
+        });
 
-        return { ...item, alasanBermasalah: alasan };
+        if (fieldKosongList.length > 0) alasan.push('Data Belum Lengkap');
+
+        return { ...item, alasanBermasalah: alasan, fieldKosongList };
       })
       .filter((item: any) => item.alasanBermasalah.length > 0);
 
@@ -5397,6 +5403,14 @@ async function fetchStatusLoginAkun() {
                     ))}
                   </div>
                 </div>
+
+                {item.fieldKosongList && item.fieldKosongList.length > 0 && (
+                  <div className="bg-orange-50 border border-orange-100 rounded-lg px-3 py-2 mb-2">
+                    <p className="text-xs font-bold text-orange-700">
+                      Belum terisi: {item.fieldKosongList.join(', ')}
+                    </p>
+                  </div>
+                )}
 
                 <div className="flex gap-3 mt-4">
                   <button
