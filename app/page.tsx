@@ -312,6 +312,8 @@ export default function Home() {
   // --- STATE DPS ---
   const [dataDPS, setDataDPS] = useState<any[]>([]);
   const [loadingDPS, setLoadingDPS] = useState(false);
+  const [progresDPSWilayah, setProgresDPSWilayah] = useState<any[]>([]);
+  const [loadingProgresDPSWilayah, setLoadingProgresDPSWilayah] = useState(false);
 
   // --- STATE DAFTAR PEMILIH (DATA MURNI SUPABASE) ---
   const [dataDaftarPemilih, setDataDaftarPemilih] = useState<any[]>([]);
@@ -482,6 +484,7 @@ export default function Home() {
       fetchBadgeCounts();
     } else if (activeMenu === 'DPS') {
       fetchDPS();
+      fetchProgresDPSWilayah();
     } else if (activeMenu === 'DPT') {
       fetchDPT();
     } else if (activeMenu === 'Daftar Pemilih') {
@@ -524,11 +527,30 @@ export default function Home() {
     };
   }, [activeMenu]);
 
-useEffect(() => {
+  useEffect(() => {
     if (activeMenu === 'TMS' && tabTMS === 'Bermasalah') {
       fetchDataBermasalahTMS();
     }
   }, [activeMenu, tabTMS]);
+
+  useEffect(() => {
+  if (activeMenu !== 'DPS') return;
+
+  const channel = supabase
+    .channel('realtime-progres-dps')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'penduduk' },
+      () => {
+        refetchTanpaGeserScroll(() => latestFetchRef.current.fetchProgresDPSWilayah());
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [activeMenu]);
 
   useEffect(() => {
     if (activeMenu !== 'DPT/Tambahan') return;
@@ -1493,29 +1515,45 @@ useEffect(() => {
   // FUNGSI DPS
   // ==========================================
   async function fetchDPS() {
-    setLoadingDPS(true);
+  setLoadingDPS(true);
 
-    const { data, error } = await supabase
-      .from('penduduk')
-      .select('*')
-      .eq('status_coklit', 'Ditemui')
-      .eq('divalidasi_admin', true)
-      .not(
-        'status_coklit',
-        'in',
-        '("Meninggal","Pindah","Tidak Dikenal","Perlu Koreksi","Belum Coklit")'
-      )
-      .is('status_dpt', null)
-      .order('NAMA', { ascending: true });
+  let semuaData: any[] = [];
+  let dariBaris = 0;
+  const ukuranHalaman = 1000;
 
-    if (error) {
-      console.error('Error Supabase (DPS):', error);
-      alert('Error saat mengambil data DPS: ' + error.message);
-    } else {
-      setDataDPS(data || []);
+  try {
+    while (true) {
+      const { data, error } = await supabase
+        .from('penduduk')
+        .select('*')
+        .eq('status_coklit', 'Ditemui')
+        .eq('divalidasi_admin', true)
+        .not(
+          'status_coklit',
+          'in',
+          '("Meninggal","Pindah","Tidak Dikenal","Perlu Koreksi","Belum Coklit")'
+        )
+        .is('status_dpt', null)
+        .order('NAMA', { ascending: true })
+        .range(dariBaris, dariBaris + ukuranHalaman - 1);
+
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+
+      semuaData = semuaData.concat(data);
+
+      if (data.length < ukuranHalaman) break; // udah halaman terakhir
+      dariBaris += ukuranHalaman;
     }
-    setLoadingDPS(false);
+
+    setDataDPS(semuaData);
+  } catch (error: any) {
+    console.error('Error Supabase (DPS):', error);
+    alert('Error saat mengambil data DPS: ' + error.message);
   }
+
+  setLoadingDPS(false);
+}
   // Data DPS setelah difilter RT/RW (client-side, karena datanya udah ke-fetch semua)
   const dataDPSFiltered = dataDPS.filter((item) => {
     const matchRT = filterRT_DPS === 'Semua' || item.RT === filterRT_DPS;
@@ -1700,6 +1738,78 @@ useEffect(() => {
       fetchDPS();
     }
   }
+
+    async function fetchProgresDPSWilayah() {
+  setLoadingProgresDPSWilayah(true);
+
+  let semuaData: any[] = [];
+  let dariBaris = 0;
+  const ukuranHalaman = 1000;
+
+  try {
+    while (true) {
+      let q = supabase
+        .from('penduduk')
+        .select('DUSUN, RT, RW, status_coklit, divalidasi_admin')
+        .range(dariBaris, dariBaris + ukuranHalaman - 1);
+
+      // Kalau Petugas Coklit, kunci ke RT/RW dia biar hematan query
+      if (user?.role === 'Petugas Coklit') {
+        if (user?.rt_assigned) q = q.eq('RT', user.rt_assigned);
+        if (user?.rw_assigned) q = q.eq('RW', user.rw_assigned);
+      }
+
+      const { data, error } = await q;
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+
+      semuaData = semuaData.concat(data);
+      if (data.length < ukuranHalaman) break;
+      dariBaris += ukuranHalaman;
+    }
+
+    // Kelompokkan per Dusun + RT + RW
+    const grouped: Record<string, { total: number; sudahDPS: number }> = {};
+
+    semuaData.forEach((item) => {
+      const dusun = item.DUSUN || '-';
+      const rt = String(item.RT ?? '').padStart(3, '0');
+      const rw = String(item.RW ?? '').padStart(3, '0');
+
+      if (!DAFTAR_RT.includes(rt) || !DAFTAR_RW.includes(rw)) return;
+
+      const key = `${dusun}-${rt}-${rw}`;
+      if (!grouped[key]) grouped[key] = { total: 0, sudahDPS: 0 };
+
+      grouped[key].total += 1;
+
+      // "Sudah masuk DPS" = udah divalidasi admin & statusnya Ditemui
+      // (baik yang masih nangkring di DPS maupun yang udah lanjut ke DPT,
+      // karena keduanya sama-sama pernah lolos jadi DPS)
+      if (item.status_coklit === 'Ditemui' && item.divalidasi_admin) {
+        grouped[key].sudahDPS += 1;
+      }
+    });
+
+    const hasil = Object.keys(grouped).map((key) => {
+      const [dusun, rt, rw] = key.split('-');
+      const total = grouped[key].total;
+      const sudahDPS = grouped[key].sudahDPS;
+      const persen = total > 0 ? Math.round((sudahDPS / total) * 100) : 0;
+      return { dusun, rt, rw, total, sudahDPS, persen };
+    });
+
+    // Urutkan dari yang persentasenya PALING RENDAH duluan (paling prioritas)
+    hasil.sort((a, b) => a.persen - b.persen);
+
+    setProgresDPSWilayah(hasil);
+  } catch (err: any) {
+    console.error('Error Supabase (Progres DPS Wilayah):', err);
+  }
+
+  setLoadingProgresDPSWilayah(false);
+}
+
   async function fetchDPT() {
     setLoadingDPT(true);
 
@@ -3064,6 +3174,8 @@ async function fetchStatusLoginAkun() {
     fetchStats,
     fetchProgresPerWilayah,
     fetchFunnelData,
+    fetchDPS,
+    fetchProgresDPSWilayah,
   };
 
   // ==========================================
@@ -4328,6 +4440,50 @@ async function fetchStatusLoginAkun() {
                 </p>
               </div>
 
+               {/* PROGRES DPS PER RT/RW — PRIORITAS */}
+              <div className="mb-6 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <h3 className="text-base font-black text-slate-900 flex items-center gap-2 mb-4">
+                  <svg className="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                  </svg>
+                  Progres DPS per RT/RW {user?.role === 'Petugas Coklit' ? '(Wilayah Anda)' : 'Prioritas'}
+                </h3>
+
+                {loadingProgresDPSWilayah ? (
+                  <div className="flex justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-4 border-orange-500"></div>
+                  </div>
+                ) : progresDPSWilayah.length === 0 ? (
+                  <p className="text-sm font-bold text-slate-400 text-center py-4">
+                    Belum ada data untuk wilayah ini.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {progresDPSWilayah.map((w) => (
+                      <div
+                        key={`${w.dusun}-${w.rt}-${w.rw}`}
+                        className="flex items-center justify-between bg-slate-50 rounded-full px-5 py-3"
+                      >
+                        <span className="text-sm font-black text-slate-700">
+                          {w.dusun} / RT {w.rt} RW {w.rw}
+                        </span>
+                        <span
+                          className={`text-sm font-black ${
+                            w.persen >= 80
+                              ? 'text-emerald-600'
+                              : w.persen >= 40
+                              ? 'text-yellow-600'
+                              : 'text-red-500'
+                          }`}
+                        >
+                          {w.sudahDPS}/{w.total} ({w.persen}%)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
               {/* FILTER RT/RW */}
               <div className="flex flex-wrap gap-3 mb-4">
                 <select
