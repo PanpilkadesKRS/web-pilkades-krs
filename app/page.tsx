@@ -6448,6 +6448,20 @@ async function fetchStatusLoginAkun() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Nomor WhatsApp (format 08xx)
+                    </label>
+                    <input
+                      type="text"
+                      value={modalAkun.no_wa || ''}
+                      onChange={(e) =>
+                        setModalAkun({ ...modalAkun, no_wa: e.target.value })
+                      }
+                      placeholder="08123456789"
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
                       Level / Role
                     </label>
                     <select
@@ -6850,7 +6864,7 @@ async function fetchStatusLoginAkun() {
                       onChange={(e) =>
                         setModalPemilihBaru({
                           ...modalPemilihBaru,
-                          TEMPAT_LAHIR: e.target.value,
+                          TEMPAT_LAHIR: e.target.value.toUpperCase(),
                         })
                       }
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
@@ -7291,22 +7305,6 @@ async function fetchStatusLoginAkun() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
-                      Tempat Lahir
-                    </label>
-                    <input
-                      type="text"
-                      value={modalEditCoklit.TEMPAT_LAHIR || ''}
-                      onChange={(e) =>
-                        setModalEditCoklit({
-                          ...modalEditCoklit,
-                          TEMPAT_LAHIR: e.target.value.toUpperCase(),
-                        })
-                      }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">
                       Tanggal Lahir
                     </label>
                     <input
@@ -7316,6 +7314,40 @@ async function fetchStatusLoginAkun() {
                         setModalEditCoklit({
                           ...modalEditCoklit,
                           TANGGAL_LAHIR: e.target.value,
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Jenis Kelamin
+                    </label>
+                    <select
+                      value={modalEditCoklit.KELAMIN}
+                      onChange={(e) =>
+                        setModalEditCoklit({
+                          ...modalEditCoklit,
+                          KELAMIN: e.target.value,
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    >
+                      <option value="L">Laki-laki</option>
+                      <option value="P">Perempuan</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Tempat Lahir
+                    </label>
+                    <input
+                      type="text"
+                      value={modalEditCoklit.TEMPAT_LAHIR || ''}
+                      onChange={(e) =>
+                        setModalEditCoklit({
+                          ...modalEditCoklit,
+                          TEMPAT_LAHIR: e.target.value,
                         })
                       }
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
@@ -7596,22 +7628,6 @@ async function fetchStatusLoginAkun() {
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
                     />
                   </div>
-                      <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">
-                      Tempat Lahir
-                    </label>
-                    <input
-                      type="text"
-                      value={modalKoreksiEdit.TEMPAT_LAHIR || ''}
-                      onChange={(e) =>
-                        setModalKoreksiEdit({
-                          ...modalKoreksiEdit,
-                          TEMPAT_LAHIR: e.target.value.toUpperCase(),
-                        })
-                      }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
-                    />
-                  </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       Tanggal Lahir
@@ -7628,6 +7644,40 @@ async function fetchStatusLoginAkun() {
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Jenis Kelamin
+                    </label>
+                    <select
+                      value={modalKoreksiEdit.KELAMIN}
+                      onChange={(e) =>
+                        setModalKoreksiEdit({
+                          ...modalKoreksiEdit,
+                          KELAMIN: e.target.value,
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    >
+                      <option value="L">Laki-laki</option>
+                      <option value="P">Perempuan</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Tempat Lahir
+                    </label>
+                    <input
+                      type="text"
+                      value={modalKoreksiEdit.TEMPAT_LAHIR || ''}
+                      onChange={(e) =>
+                        setModalKoreksiEdit({
+                          ...modalKoreksiEdit,
+                          TEMPAT_LAHIR: e.target.value.toUpperCase(),
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+                    />
+                  </div>
                   <div className="md:col-span-2">
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       Alamat
@@ -7638,7 +7688,7 @@ async function fetchStatusLoginAkun() {
                       onChange={(e) =>
                         setModalKoreksiEdit({
                           ...modalKoreksiEdit,
-                          ALAMAT: e.target.value,
+                          ALAMAT: e.target.value.toUpperCase(),
                         })
                       }
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
@@ -8098,11 +8148,29 @@ async function fetchStatusLoginAkun() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Jenis Kelamin
+                    </label>
+                    <select
+                      value={modalEditDaftarPemilih.KELAMIN}
+                      onChange={(e) =>
+                        setModalEditDaftarPemilih({
+                          ...modalEditDaftarPemilih,
+                          KELAMIN: e.target.value,
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    >
+                      <option value="L">Laki-laki</option>
+                      <option value="P">Perempuan</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
                       Tempat Lahir
                     </label>
                     <input
                       type="text"
-                      value={modalEditDaftarPemilih.TEMPAT_LAHIR || ''}
+                      value={modalEditDaftarPemilih.TEMPAT_LAHIR}
                       onChange={(e) =>
                         setModalEditDaftarPemilih({
                           ...modalEditDaftarPemilih,
