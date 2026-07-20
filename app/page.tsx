@@ -47,7 +47,7 @@ const TANGGAL_DPS = new Date(2026, 7, 8, 23, 59, 59); // 8 Agustus 2026
 const TANGGAL_DPT = new Date(2026, 8, 4, 23, 59, 59); // 4 September 2026
 const TANGGAL_HARI_H = new Date(2026, 8, 20); // 20 September 2026
 
-const STATUS_TMS_LIST = ['Pindah', 'Meninggal', 'Tidak Dikenal'];
+const STATUS_TMS_LIST = ['Pindah', 'Meninggal', 'Tidak Dikenal', 'Tidak di Rumah'];
 
 const DAFTAR_RAGAM_DISABILITAS = [
   'Fisik',
@@ -978,7 +978,7 @@ export default function Home() {
     ).eq('status_coklit', 'Ditemui');
     const tmsQ = baseFilter(
       supabase.from('penduduk').select('*', { count: 'exact', head: true })
-    ).in('status_coklit', ['Pindah', 'Meninggal', 'Tidak Dikenal']);
+    ).in('status_coklit', ['Pindah', 'Meninggal', 'Tidak Dikenal', 'Tidak di Rumah']);
     const bermasalahQ = baseFilter(
       supabase.from('penduduk').select('*', { count: 'exact', head: true })
     ).eq('status_coklit', 'Perlu Koreksi');
@@ -2245,7 +2245,7 @@ async function fetchTMS() {
   let query = supabase
     .from('penduduk')
     .select('*')
-    .in('status_coklit', ['Pindah', 'Meninggal', 'Tidak Dikenal']);
+    .in('status_coklit', ['Pindah', 'Meninggal', 'Tidak Dikenal', 'Tidak di Rumah']);
 
   // KALAU PETUGAS COKLIT: otomatis kunci ke RT/RW yang ditugaskan ke dia
   if (user?.role === 'Petugas Coklit') {
@@ -5376,6 +5376,7 @@ async function fetchStatusLoginAkun() {
         <option value="Pindah">Pindah</option>
         <option value="Meninggal">Meninggal</option>
         <option value="Tidak Dikenal">Tidak Dikenal</option>
+        <option value="Tidak di Rumah">Tidak di Rumah</option>
       </select>
     </div>
 
