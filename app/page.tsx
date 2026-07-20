@@ -354,6 +354,8 @@ export default function Home() {
   const [searchDPT, setSearchDPT] = useState('');
   const [filterRT_DPT, setFilterRT_DPT] = useState('Semua');
   const [filterRW_DPT, setFilterRW_DPT] = useState('Semua');
+  const [selectedDPT, setSelectedDPT] = useState<string[]>([]);
+  const [loadingBatalkanMassalDPT, setLoadingBatalkanMassalDPT] = useState(false);
 
   // --- STATE FILTER & AKSI DPS ---
   const [filterRT_DPS, setFilterRT_DPS] = useState('Semua');
@@ -1843,6 +1845,60 @@ export default function Home() {
     if (error) {
       alert('Gagal membatalkan: ' + error.message);
     } else {
+      fetchDPT();
+    }
+  }
+
+  function toggleSelectDPT(id: string) {
+    setSelectedDPT((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  function toggleSelectAllDPT() {
+    if (selectedDPT.length === dataDPT.length) {
+      setSelectedDPT([]);
+    } else {
+      setSelectedDPT(dataDPT.map((item) => item.id));
+    }
+  }
+
+  async function batalkanMassalDariDPT() {
+    const dataToProcess =
+      selectedDPT.length > 0
+        ? dataDPT.filter((item) => selectedDPT.includes(item.id))
+        : dataDPT;
+
+    if (dataToProcess.length === 0) {
+      alert('Tidak ada data untuk dibatalkan.');
+      return;
+    }
+
+    if (
+      !confirm(
+        `Batalkan status DPT untuk ${dataToProcess.length} pemilih${
+          selectedDPT.length > 0 ? ' terpilih' : ' (SEMUA yang tampil di filter ini)'
+        }? Data akan kembali muncul di menu DPS.`
+      )
+    )
+      return;
+
+    setLoadingBatalkanMassalDPT(true);
+
+    const ids = dataToProcess.map((item) => item.id);
+
+    const { error } = await supabase
+      .from('penduduk')
+      .update({ status_dpt: null, tanggal_masuk_dpt: null })
+      .in('id', ids);
+
+    setLoadingBatalkanMassalDPT(false);
+
+    if (error) {
+      alert('Gagal membatalkan massal: ' + error.message);
+    } else {
+      alert(`${dataToProcess.length} pemilih berhasil dibatalkan dari DPT dan kembali ke DPS.`);
+      setSelectedDPT([]);
       fetchDPT();
     }
   }
@@ -4754,28 +4810,59 @@ async function fetchStatusLoginAkun() {
                 </select>
               </div>
 
-              {/* INFO & EXPORT */}
+             {/* INFO, EXPORT & BATALKAN MASSAL */}
               <div className="flex flex-wrap justify-between items-center gap-3 bg-indigo-50 border border-indigo-200 text-indigo-700 p-4 rounded-xl mb-6 text-sm font-bold shadow-sm">
-                <span>Total DPT: {dataDPT.length} pemilih</span>
-                <button
-                  onClick={exportDPTToCSV}
-                  className="px-4 py-2 bg-white border-2 border-indigo-300 text-indigo-700 rounded-lg text-xs font-black hover:bg-indigo-100 transition-all flex items-center gap-1.5"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    strokeWidth="2.5"
+                <span>
+                  Total DPT: {dataDPT.length} pemilih
+                  {selectedDPT.length > 0 && ` · ${selectedDPT.length} dipilih`}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={exportDPTToCSV}
+                    className="px-4 py-2 bg-white border-2 border-indigo-300 text-indigo-700 rounded-lg text-xs font-black hover:bg-indigo-100 transition-all flex items-center gap-1.5"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                    ></path>
-                  </svg>
-                  Export CSV
-                </button>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      strokeWidth="2.5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                      ></path>
+                    </svg>
+                    Export CSV
+                  </button>
+                  <button
+                    onClick={batalkanMassalDariDPT}
+                    disabled={loadingBatalkanMassalDPT || dataDPT.length === 0}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-black hover:bg-red-700 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      strokeWidth="2.5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M11 17a4 4 0 01-8 0V5a2 2 0 012-2h4a2 2 0 012 2v12zM11 17a4 4 0 008 0V9a2 2 0 00-2-2h-4"
+                      ></path>
+                    </svg>
+                    {loadingBatalkanMassalDPT
+                      ? 'Membatalkan...'
+                      : `Batalkan${
+                          selectedDPT.length > 0
+                            ? ` (${selectedDPT.length})`
+                            : ' Semua'
+                        } ke DPS`}
+                  </button>
+                </div>
               </div>
 
               {loadingDPT ? (
@@ -4791,6 +4878,17 @@ async function fetchStatusLoginAkun() {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
+                        <th className="p-4 w-10">
+                          <input
+                            type="checkbox"
+                            checked={
+                              selectedDPT.length === dataDPT.length &&
+                              dataDPT.length > 0
+                            }
+                            onChange={toggleSelectAllDPT}
+                            className="w-4 h-4 cursor-pointer"
+                          />
+                        </th>
                         <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">
                           Nama
                         </th>
@@ -4824,8 +4922,18 @@ async function fetchStatusLoginAkun() {
                       {dataDPT.map((item) => (
                         <tr
                           key={item.id}
-                          className="border-b border-slate-100 hover:bg-slate-50"
+                          className={`border-b border-slate-100 hover:bg-slate-50 ${
+                            selectedDPT.includes(item.id) ? 'bg-red-50/50' : ''
+                          }`}
                         >
+                          <td className="p-4">
+                            <input
+                              type="checkbox"
+                              checked={selectedDPT.includes(item.id)}
+                              onChange={() => toggleSelectDPT(item.id)}
+                              className="w-4 h-4 cursor-pointer"
+                            />
+                          </td>
                           <td className="p-4 font-bold uppercase">
                             {item.NAMA}
                           </td>
