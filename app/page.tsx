@@ -295,6 +295,7 @@ export default function Home() {
   );
   const [loadingSimpanKoreksiEdit, setLoadingSimpanKoreksiEdit] =
     useState(false);
+  const [daftarPetugasWilayah, setDaftarPetugasWilayah] = useState<any[]>([]);
 
   // --- STATE STATISTIK & FILTER COKLIT ---
   const [statistikCoklit, setStatistikCoklit] = useState({
@@ -380,6 +381,8 @@ export default function Home() {
   const [loadingSimpanPerbaikiBermasalah, setLoadingSimpanPerbaikiBermasalah] = useState(false);
   const [searchBermasalahTMS, setSearchBermasalahTMS] = useState('');
   const [filterAlasanBermasalahTMS, setFilterAlasanBermasalahTMS] = useState('Semua');
+  const [filterRT_BermasalahTMS, setFilterRT_BermasalahTMS] = useState('Semua');
+  const [filterRW_BermasalahTMS, setFilterRW_BermasalahTMS] = useState('Semua');
 
   // --- STATE DPT/TAMBAHAN ---
   const [dataDPTTambahan, setDataDPTTambahan] = useState<any[]>([]);
@@ -484,6 +487,7 @@ export default function Home() {
       fetchDataBermasalah();
       fetchPemilihBaruVerifikasi();
       fetchBadgeCounts();
+      fetchDaftarPetugasWilayah();
     } else if (activeMenu === 'DPS') {
       fetchDPS();
       fetchProgresDPSWilayah();
@@ -1052,6 +1056,21 @@ export default function Home() {
     if (!modalKoreksiEdit) return;
     setModalAksiSetelahEdit({ ...modalKoreksiEdit });
     setModalKoreksiEdit(null);
+  }
+
+  async function fetchDaftarPetugasWilayah() {
+    const { data } = await supabase
+      .from('akun_petugas')
+      .select('nama_lengkap, rt_assigned, rw_assigned, role')
+      .eq('role', 'Petugas Coklit');
+    setDaftarPetugasWilayah(data || []);
+  }
+
+  function cariPetugasWilayah(rt: string, rw: string) {
+  const petugas = daftarPetugasWilayah.find(
+    (p) => p.rt_assigned === rt && p.rw_assigned === rw
+  );
+  return petugas?.nama_lengkap || null;
   }
 
   async function simpanKoreksiBermasalah(langsungKirimDPS: boolean) {
@@ -2521,15 +2540,26 @@ const dataBermasalahTMSFiltered = useMemo(() => {
       filterAlasanBermasalahTMS === 'Semua' ||
       item.alasanBermasalah?.includes(filterAlasanBermasalahTMS);
 
+    const matchRT =
+      filterRT_BermasalahTMS === 'Semua' || item.RT === filterRT_BermasalahTMS;
+    const matchRW =
+      filterRW_BermasalahTMS === 'Semua' || item.RW === filterRW_BermasalahTMS;
+
     const q = searchBermasalahTMS.trim().toLowerCase();
     const matchSearch =
       !q ||
       item.NAMA?.toLowerCase().includes(q) ||
       item.NIK?.toLowerCase().includes(q);
 
-    return matchAlasan && matchSearch;
+    return matchAlasan && matchRT && matchRW && matchSearch;
   });
-}, [dataBermasalahTMS, filterAlasanBermasalahTMS, searchBermasalahTMS]);
+}, [
+  dataBermasalahTMS,
+  filterAlasanBermasalahTMS,
+  filterRT_BermasalahTMS,
+  filterRW_BermasalahTMS,
+  searchBermasalahTMS,
+]);
 
     // ==========================================
   // FUNGSI DPT/TAMBAHAN (REKAP HASIL TEMUAN LAPANGAN)
@@ -4306,8 +4336,16 @@ async function fetchStatusLoginAkun() {
                             <p className="text-xs font-bold text-slate-500">
                               NIK: {item.NIK}
                             </p>
+                            <p className="text-xs font-bold text-slate-500 mt-1">
+                              Dusun {item.DUSUN || '-'} · RT {item.RT || '-'}/RW {item.RW || '-'}
+                            </p>
+                            <p className="text-xs font-black text-orange-600 mt-1">
+                              {cariPetugasWilayah(item.RT, item.RW)
+                                ? `Petugas: ${cariPetugasWilayah(item.RT, item.RW)}`
+                                : 'Petugas wilayah ini belum terdaftar'}
+                            </p>
                           </div>
-                          <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-[10px] font-black uppercase">
+                          <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-[10px] font-black uppercase whitespace-nowrap">
                             Perlu Koreksi
                           </span>
                         </div>
@@ -5441,6 +5479,36 @@ async function fetchStatusLoginAkun() {
         onChange={(e) => setSearchBermasalahTMS(e.target.value)}
         className="flex-1 min-w-[200px] p-3 border-2 border-slate-200 rounded-xl font-bold text-sm focus:border-orange-500 outline-none shadow-sm"
       />
+
+      {user?.role !== 'Petugas Coklit' && (
+        <>
+          <select
+            value={filterRT_BermasalahTMS}
+            onChange={(e) => setFilterRT_BermasalahTMS(e.target.value)}
+            className="p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+          >
+            <option value="Semua">Semua RT</option>
+            {DAFTAR_RT.map((rt) => (
+              <option key={rt} value={rt}>
+                RT {rt}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filterRW_BermasalahTMS}
+            onChange={(e) => setFilterRW_BermasalahTMS(e.target.value)}
+            className="p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+          >
+            <option value="Semua">Semua RW</option>
+            {DAFTAR_RW.map((rw) => (
+              <option key={rw} value={rw}>
+                RW {rw}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+
       <div className="flex flex-wrap gap-2">
         {[
           { id: 'Semua', label: 'Semua' },
