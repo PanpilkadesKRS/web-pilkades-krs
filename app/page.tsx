@@ -258,6 +258,52 @@ export default function Home() {
   const [modalAkun, setModalAkun] = useState<any | null>(null);
   const [loadingSimpan, setLoadingSimpan] = useState(false);
 
+  // --- STATE KANDIDAT ---
+  const [dataKandidat, setDataKandidat] = useState<any[]>([]);
+  const [loadingKandidat, setLoadingKandidat] = useState(false);
+  const [modalKandidat, setModalKandidat] = useState<any | null>(null);
+  const [loadingSimpanKandidat, setLoadingSimpanKandidat] = useState(false);
+  const [loadingFotoKandidat, setLoadingFotoKandidat] = useState(false);
+
+  // --- STATE TPS ---
+  const [dataTPSMaster, setDataTPSMaster] = useState<any[]>([]);
+  const [loadingTPSMaster, setLoadingTPSMaster] = useState(false);
+  const [modalTPS, setModalTPS] = useState<any | null>(null);
+  const [loadingSimpanTPS, setLoadingSimpanTPS] = useState(false);
+  const [jumlahDPTPerTPS, setJumlahDPTPerTPS] = useState<Record<string, number>>({});
+
+  // --- STATE REAL COUNT ---
+  const [dataRealCount, setDataRealCount] = useState<any[]>([]);
+  const [loadingRealCount, setLoadingRealCount] = useState(false);
+  const [modalInputSuara, setModalInputSuara] = useState<any | null>(null);
+  const [loadingSimpanRealCount, setLoadingSimpanRealCount] = useState(false);
+
+  // --- STATE SAKSI ---
+  const [dataSaksi, setDataSaksi] = useState<any[]>([]);
+  const [loadingSaksi, setLoadingSaksi] = useState(false);
+  const [modalSaksi, setModalSaksi] = useState<any | null>(null);
+  const [loadingSimpanSaksi, setLoadingSimpanSaksi] = useState(false);
+  const [filterTPS_Saksi, setFilterTPS_Saksi] = useState('Semua');
+
+  // --- STATE KPPS ---
+  const [dataAnggotaKPPS, setDataAnggotaKPPS] = useState<any[]>([]);
+  const [loadingAnggotaKPPS, setLoadingAnggotaKPPS] = useState(false);
+  const [modalAnggotaKPPS, setModalAnggotaKPPS] = useState<any | null>(null);
+  const [loadingSimpanAnggotaKPPS, setLoadingSimpanAnggotaKPPS] = useState(false);
+  const [filterTPS_KPPS, setFilterTPS_KPPS] = useState('Semua');
+
+  // --- STATE HARI H ---
+  const [dataHariH, setDataHariH] = useState<any[]>([]);
+  const [loadingHariH, setLoadingHariH] = useState(false);
+  const [searchHariH, setSearchHariH] = useState('');
+  const [filterTPS_HariH, setFilterTPS_HariH] = useState('Semua');
+  const [loadingToggleHadir, setLoadingToggleHadir] = useState<string | null>(null);
+
+  // --- STATE PETA TPS ---
+  const [leafletSiap, setLeafletSiap] = useState(false);
+  const petaRef = useRef<HTMLDivElement>(null);
+  const petaInstanceRef = useRef<any>(null);
+
   // --- STATE DASHBOARD ---
   const [stats, setStats] = useState({ total: 0, belum: 0, sudah: 0, lakiLaki: 0, perempuan: 0 });
   const [progresPerWilayah, setProgresPerWilayah] = useState<any[]>([]);
@@ -503,6 +549,30 @@ export default function Home() {
       fetchDPTTambahan();
     } else if (activeMenu === 'Aktivitas Login') {
       fetchStatusLoginAkun();
+    } else if (activeMenu === 'Kandidat') {
+      fetchKandidat();
+    } else if (activeMenu === 'TPS') {
+      fetchTPSMaster();
+    } else if (activeMenu === 'Saksi') {
+      fetchSaksi();
+      if (dataTPSMaster.length === 0) fetchTPSMaster();
+      if (dataKandidat.length === 0) fetchKandidat();
+    } else if (activeMenu === 'KPPS') {
+      fetchAnggotaKPPS();
+      if (dataTPSMaster.length === 0) fetchTPSMaster();
+    } else if (activeMenu === 'Real Count') {
+      if (dataKandidat.length === 0) fetchKandidat();
+      fetchRealCount();
+   } else if (activeMenu === 'Hari H') {
+      fetchHariH();
+      fetchRekapKehadiranTPS();
+      if (dataTPSMaster.length === 0) fetchTPSMaster();
+      refetchTanpaGeserScroll(async () => {
+            await latestFetchRef.current.fetchHariH();
+            await latestFetchRef.current.fetchRekapKehadiranTPS();
+          });
+    } else if (activeMenu === 'Peta TPS') {
+      if (dataTPSMaster.length === 0) fetchTPSMaster();
     }
   }, [activeMenu]);
 
@@ -538,6 +608,135 @@ export default function Home() {
       fetchDataBermasalahTMS();
     }
   }, [activeMenu, tabTMS]);
+
+  useEffect(() => {
+    if (activeMenu !== 'Real Count') return;
+
+    const channel = supabase
+      .channel('realtime-real-count')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'hasil_suara' },
+        () => {
+          refetchTanpaGeserScroll(() => latestFetchRef.current.fetchRealCount());
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rekap_suara_tps' },
+        () => {
+          refetchTanpaGeserScroll(() => latestFetchRef.current.fetchRealCount());
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeMenu]);
+
+  useEffect(() => {
+    if (activeMenu !== 'Hari H') return;
+    const delayDebounceFn = setTimeout(() => {
+      fetchHariH();
+    }, 400);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchHariH, filterTPS_HariH]);
+
+  useEffect(() => {
+    if (activeMenu !== 'Hari H') return;
+
+    const channel = supabase
+      .channel('realtime-hari-h')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'penduduk' },
+        () => {
+          refetchTanpaGeserScroll(() => latestFetchRef.current.fetchHariH());
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeMenu]);
+
+  useEffect(() => {
+    if (activeMenu !== 'Peta TPS') return;
+    if ((window as any).L) {
+      setLeafletSiap(true);
+      return;
+    }
+
+    const cssLink = document.createElement('link');
+    cssLink.rel = 'stylesheet';
+    cssLink.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(cssLink);
+
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.onload = () => setLeafletSiap(true);
+    document.body.appendChild(script);
+  }, [activeMenu]);
+
+  useEffect(() => {
+    if (activeMenu !== 'Peta TPS') return;
+    if (!leafletSiap || !petaRef.current) return;
+    if (dataTPSMaster.length === 0) return;
+
+    const L = (window as any).L;
+
+    // Hancurkan peta lama kalau ada, biar gak numpuk pas re-render
+    if (petaInstanceRef.current) {
+      petaInstanceRef.current.remove();
+      petaInstanceRef.current = null;
+    }
+
+    const titikValid = dataTPSMaster.filter((t) => t.latitude && t.longitude);
+
+    const pusatDefault: [number, number] =
+      titikValid.length > 0
+        ? [titikValid[0].latitude, titikValid[0].longitude]
+        : [-7.5, 109.5];
+
+    const peta = L.map(petaRef.current).setView(pusatDefault, 14);
+    petaInstanceRef.current = peta;
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(peta);
+
+    const bounds: [number, number][] = [];
+
+    titikValid.forEach((t) => {
+      const marker = L.marker([t.latitude, t.longitude]).addTo(peta);
+      marker.bindPopup(`
+        <div style="font-family: sans-serif; min-width: 160px;">
+          <b>TPS ${t.nomor_tps}</b><br/>
+          ${t.nama_lokasi || ''}<br/>
+          <span style="font-size:11px;color:#666;">${t.alamat || ''}</span><br/>
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${t.latitude},${t.longitude}"
+             target="_blank" rel="noopener noreferrer"
+             style="display:inline-block;margin-top:6px;padding:4px 10px;background:#4f46e5;color:white;border-radius:6px;text-decoration:none;font-size:11px;font-weight:bold;">
+            Arahkan ke Sini
+          </a>
+        </div>
+      `);
+      bounds.push([t.latitude, t.longitude]);
+    });
+
+    if (bounds.length > 1) {
+      peta.fitBounds(bounds, { padding: [40, 40] });
+    }
+
+    return () => {
+      if (petaInstanceRef.current) {
+        petaInstanceRef.current.remove();
+        petaInstanceRef.current = null;
+      }
+    };
+  }, [activeMenu, leafletSiap, dataTPSMaster]);
 
   useEffect(() => {
   if (activeMenu !== 'DPS') return;
@@ -3250,6 +3449,711 @@ async function fetchStatusLoginAkun() {
     }
   }
 
+    // ==========================================
+  // FUNGSI KANDIDAT
+  // ==========================================
+  async function fetchKandidat() {
+    setLoadingKandidat(true);
+    const { data, error } = await supabase
+      .from('kandidat')
+      .select('*')
+      .order('nomor_urut', { ascending: true });
+
+    if (error) {
+      console.error('Error Supabase (Kandidat):', error);
+      alert('Error saat mengambil data kandidat: ' + error.message);
+    } else {
+      setDataKandidat(data || []);
+    }
+    setLoadingKandidat(false);
+  }
+
+  function bukaTambahKandidat() {
+    setModalKandidat({
+      nomor_urut: dataKandidat.length + 1,
+      nama: '',
+      nama_wakil: '',
+      foto_url: '',
+      visi: '',
+      misi: '',
+    });
+  }
+
+  function bukaEditKandidat(item: any) {
+    setModalKandidat({ ...item });
+  }
+
+  async function handleUploadFotoKandidat(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !modalKandidat) return;
+
+    setLoadingFotoKandidat(true);
+
+    const namaFile = `kandidat-${Date.now()}.${file.name.split('.').pop()}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('kandidat')
+      .upload(namaFile, file, { upsert: true });
+
+    if (uploadError) {
+      alert('Gagal upload foto: ' + uploadError.message);
+      setLoadingFotoKandidat(false);
+      return;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from('kandidat')
+      .getPublicUrl(namaFile);
+
+    setModalKandidat((prev: any) => ({ ...prev, foto_url: publicUrlData.publicUrl }));
+    setLoadingFotoKandidat(false);
+  }
+
+  async function simpanKandidat(e: React.FormEvent) {
+    e.preventDefault();
+    if (!modalKandidat) return;
+
+    setLoadingSimpanKandidat(true);
+
+    const payload: any = {
+      nomor_urut: Number(modalKandidat.nomor_urut),
+      nama: modalKandidat.nama,
+      nama_wakil: modalKandidat.nama_wakil || null,
+      foto_url: modalKandidat.foto_url || null,
+      visi: modalKandidat.visi || null,
+      misi: modalKandidat.misi || null,
+    };
+
+    let error;
+    if (modalKandidat.id) {
+      const res = await supabase
+        .from('kandidat')
+        .update(payload)
+        .eq('id', modalKandidat.id);
+      error = res.error;
+    } else {
+      const res = await supabase.from('kandidat').insert(payload);
+      error = res.error;
+    }
+
+    setLoadingSimpanKandidat(false);
+
+    if (error) {
+      alert('Gagal menyimpan kandidat: ' + error.message);
+    } else {
+      setModalKandidat(null);
+      fetchKandidat();
+    }
+  }
+
+  async function hapusKandidat(item: any) {
+    if (!confirm(`Yakin ingin menghapus kandidat "${item.nama}"? Aksi ini tidak bisa dibatalkan.`))
+      return;
+
+    const { error } = await supabase.from('kandidat').delete().eq('id', item.id);
+
+    if (error) {
+      alert('Gagal menghapus kandidat: ' + error.message);
+    } else {
+      fetchKandidat();
+    }
+  }
+
+    // ==========================================
+  // FUNGSI TPS (MASTER DATA)
+  // ==========================================
+  async function fetchTPSMaster() {
+    setLoadingTPSMaster(true);
+
+    const { data, error } = await supabase
+      .from('tps')
+      .select('*')
+      .order('nomor_tps', { ascending: true });
+
+    if (error) {
+      console.error('Error Supabase (TPS):', error);
+      alert('Error saat mengambil data TPS: ' + error.message);
+      setLoadingTPSMaster(false);
+      return;
+    }
+
+    setDataTPSMaster(data || []);
+
+    // Hitung jumlah DPT per nomor TPS, langsung dari tabel penduduk
+    // (kolom TPS di penduduk itu teks bebas, dicocokkan ke nomor_tps di sini)
+    const { data: dptData, error: dptError } = await supabase
+      .from('penduduk')
+      .select('TPS')
+      .eq('status_dpt', 'DPT');
+
+    if (!dptError && dptData) {
+      const hitung: Record<string, number> = {};
+      dptData.forEach((item: any) => {
+        const key = String(item.TPS || '').trim();
+        if (!key) return;
+        hitung[key] = (hitung[key] || 0) + 1;
+      });
+      setJumlahDPTPerTPS(hitung);
+    }
+
+    setLoadingTPSMaster(false);
+  }
+
+  function bukaTambahTPS() {
+    setModalTPS({
+      nomor_tps: '',
+      nama_lokasi: '',
+      alamat: '',
+      dusun: '',
+      rt_cakupan: [] as string[],
+      rw_cakupan: [] as string[],
+      latitude: '',
+      longitude: '',
+      keterangan: '',
+    });
+  }
+
+  function bukaEditTPS(item: any) {
+    setModalTPS({
+      ...item,
+      rt_cakupan: item.rt_cakupan || [],
+      rw_cakupan: item.rw_cakupan || [],
+    });
+  }
+
+  function toggleRTCakupanTPS(rt: string) {
+    setModalTPS((prev: any) => {
+      const current = prev.rt_cakupan || [];
+      const updated = current.includes(rt)
+        ? current.filter((r: string) => r !== rt)
+        : [...current, rt];
+      return { ...prev, rt_cakupan: updated };
+    });
+  }
+
+  function toggleRWCakupanTPS(rw: string) {
+    setModalTPS((prev: any) => {
+      const current = prev.rw_cakupan || [];
+      const updated = current.includes(rw)
+        ? current.filter((r: string) => r !== rw)
+        : [...current, rw];
+      return { ...prev, rw_cakupan: updated };
+    });
+  }
+
+  async function simpanTPS(e: React.FormEvent) {
+    e.preventDefault();
+    if (!modalTPS) return;
+
+    setLoadingSimpanTPS(true);
+
+    const payload: any = {
+      nomor_tps: modalTPS.nomor_tps,
+      nama_lokasi: modalTPS.nama_lokasi || null,
+      alamat: modalTPS.alamat || null,
+      dusun: modalTPS.dusun || null,
+      rt_cakupan: modalTPS.rt_cakupan?.length > 0 ? modalTPS.rt_cakupan : null,
+      rw_cakupan: modalTPS.rw_cakupan?.length > 0 ? modalTPS.rw_cakupan : null,
+      latitude: modalTPS.latitude ? Number(modalTPS.latitude) : null,
+      longitude: modalTPS.longitude ? Number(modalTPS.longitude) : null,
+      keterangan: modalTPS.keterangan || null,
+    };
+
+    let error;
+    if (modalTPS.id) {
+      const res = await supabase.from('tps').update(payload).eq('id', modalTPS.id);
+      error = res.error;
+    } else {
+      const res = await supabase.from('tps').insert(payload);
+      error = res.error;
+    }
+
+    setLoadingSimpanTPS(false);
+
+    if (error) {
+      alert('Gagal menyimpan TPS: ' + error.message);
+    } else {
+      setModalTPS(null);
+      fetchTPSMaster();
+    }
+  }
+
+  async function hapusTPS(item: any) {
+    if (
+      !confirm(
+        `Yakin ingin menghapus TPS ${item.nomor_tps}? Data saksi/KPPS/hasil suara yang terhubung ke TPS ini juga akan ikut terhapus.`
+      )
+    )
+      return;
+
+    const { error } = await supabase.from('tps').delete().eq('id', item.id);
+
+    if (error) {
+      alert('Gagal menghapus TPS: ' + error.message);
+    } else {
+      fetchTPSMaster();
+    }
+  }
+
+  function bukaGoogleMapsTPS(item: any) {
+    if (!item.latitude || !item.longitude) {
+      alert('TPS ini belum punya titik koordinat. Tambahkan dulu lewat Edit.');
+      return;
+    }
+    window.open(
+      `https://www.google.com/maps/dir/?api=1&destination=${item.latitude},${item.longitude}`,
+      '_blank'
+    );
+  }
+
+  // ==========================================
+  // FUNGSI SAKSI
+  // ==========================================
+  async function fetchSaksi() {
+    setLoadingSaksi(true);
+
+    const { data, error } = await supabase
+      .from('saksi')
+      .select('*, kandidat:kandidat_id(nama, nomor_urut), tps:tps_id(nomor_tps, nama_lokasi)')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error Supabase (Saksi):', error);
+      alert('Error saat mengambil data saksi: ' + error.message);
+    } else {
+      setDataSaksi(data || []);
+    }
+    setLoadingSaksi(false);
+  }
+
+  const dataSaksiFiltered = useMemo(() => {
+    if (filterTPS_Saksi === 'Semua') return dataSaksi;
+    return dataSaksi.filter((s) => s.tps?.nomor_tps === filterTPS_Saksi);
+  }, [dataSaksi, filterTPS_Saksi]);
+
+  function bukaTambahSaksi() {
+    setModalSaksi({
+      nama: '',
+      kandidat_id: '',
+      tps_id: '',
+      no_hp: '',
+      nik: '',
+    });
+  }
+
+  function bukaEditSaksi(item: any) {
+    setModalSaksi({
+      id: item.id,
+      nama: item.nama,
+      kandidat_id: item.kandidat_id || '',
+      tps_id: item.tps_id || '',
+      no_hp: item.no_hp || '',
+      nik: item.nik || '',
+    });
+  }
+
+  async function simpanSaksi(e: React.FormEvent) {
+    e.preventDefault();
+    if (!modalSaksi) return;
+
+    setLoadingSimpanSaksi(true);
+
+    const payload: any = {
+      nama: modalSaksi.nama,
+      kandidat_id: modalSaksi.kandidat_id || null,
+      tps_id: modalSaksi.tps_id || null,
+      no_hp: modalSaksi.no_hp || null,
+      nik: modalSaksi.nik || null,
+    };
+
+    let error;
+    if (modalSaksi.id) {
+      const res = await supabase.from('saksi').update(payload).eq('id', modalSaksi.id);
+      error = res.error;
+    } else {
+      const res = await supabase.from('saksi').insert(payload);
+      error = res.error;
+    }
+
+    setLoadingSimpanSaksi(false);
+
+    if (error) {
+      alert('Gagal menyimpan saksi: ' + error.message);
+    } else {
+      setModalSaksi(null);
+      fetchSaksi();
+    }
+  }
+
+  async function hapusSaksi(item: any) {
+    if (!confirm(`Yakin ingin menghapus saksi "${item.nama}"?`)) return;
+
+    const { error } = await supabase.from('saksi').delete().eq('id', item.id);
+
+    if (error) {
+      alert('Gagal menghapus saksi: ' + error.message);
+    } else {
+      fetchSaksi();
+    }
+  }
+
+  async function toggleHadirSaksi(item: any) {
+    const statusBaru = !item.status_hadir;
+
+    const { error } = await supabase
+      .from('saksi')
+      .update({
+        status_hadir: statusBaru,
+        waktu_hadir: statusBaru ? new Date().toISOString() : null,
+      })
+      .eq('id', item.id);
+
+    if (error) {
+      alert('Gagal mengubah status kehadiran: ' + error.message);
+    } else {
+      fetchSaksi();
+    }
+  }
+
+  // ==========================================
+  // FUNGSI ANGGOTA KPPS
+  // ==========================================
+  async function fetchAnggotaKPPS() {
+    setLoadingAnggotaKPPS(true);
+
+    const { data, error } = await supabase
+      .from('anggota_kpps')
+      .select('*, tps:tps_id(nomor_tps, nama_lokasi)')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error Supabase (Anggota KPPS):', error);
+      alert('Error saat mengambil data anggota KPPS: ' + error.message);
+    } else {
+      setDataAnggotaKPPS(data || []);
+    }
+    setLoadingAnggotaKPPS(false);
+  }
+
+  const dataAnggotaKPPSFiltered = useMemo(() => {
+    if (filterTPS_KPPS === 'Semua') return dataAnggotaKPPS;
+    return dataAnggotaKPPS.filter((a) => a.tps?.nomor_tps === filterTPS_KPPS);
+  }, [dataAnggotaKPPS, filterTPS_KPPS]);
+
+  function bukaTambahAnggotaKPPS() {
+    setModalAnggotaKPPS({
+      nama: '',
+      tps_id: '',
+      jabatan: 'Ketua',
+      no_hp: '',
+      nik: '',
+    });
+  }
+
+  function bukaEditAnggotaKPPS(item: any) {
+    setModalAnggotaKPPS({
+      id: item.id,
+      nama: item.nama,
+      tps_id: item.tps_id || '',
+      jabatan: item.jabatan || 'Ketua',
+      no_hp: item.no_hp || '',
+      nik: item.nik || '',
+    });
+  }
+
+  async function simpanAnggotaKPPS(e: React.FormEvent) {
+    e.preventDefault();
+    if (!modalAnggotaKPPS) return;
+
+    setLoadingSimpanAnggotaKPPS(true);
+
+    const payload: any = {
+      nama: modalAnggotaKPPS.nama,
+      tps_id: modalAnggotaKPPS.tps_id || null,
+      jabatan: modalAnggotaKPPS.jabatan || null,
+      no_hp: modalAnggotaKPPS.no_hp || null,
+      nik: modalAnggotaKPPS.nik || null,
+    };
+
+    let error;
+    if (modalAnggotaKPPS.id) {
+      const res = await supabase
+        .from('anggota_kpps')
+        .update(payload)
+        .eq('id', modalAnggotaKPPS.id);
+      error = res.error;
+    } else {
+      const res = await supabase.from('anggota_kpps').insert(payload);
+      error = res.error;
+    }
+
+    setLoadingSimpanAnggotaKPPS(false);
+
+    if (error) {
+      alert('Gagal menyimpan anggota KPPS: ' + error.message);
+    } else {
+      setModalAnggotaKPPS(null);
+      fetchAnggotaKPPS();
+    }
+  }
+
+  async function hapusAnggotaKPPS(item: any) {
+    if (!confirm(`Yakin ingin menghapus ${item.nama} dari daftar KPPS?`)) return;
+
+    const { error } = await supabase.from('anggota_kpps').delete().eq('id', item.id);
+
+    if (error) {
+      alert('Gagal menghapus anggota KPPS: ' + error.message);
+    } else {
+      fetchAnggotaKPPS();
+    }
+  }
+
+  // ==========================================
+  // FUNGSI REAL COUNT
+  // ==========================================
+  async function fetchRealCount() {
+    setLoadingRealCount(true);
+
+    try {
+      const [tpsRes, kandidatRes, suaraRes, rekapRes] = await Promise.all([
+        supabase.from('tps').select('*').order('nomor_tps', { ascending: true }),
+        supabase.from('kandidat').select('*').order('nomor_urut', { ascending: true }),
+        supabase.from('hasil_suara').select('*'),
+        supabase.from('rekap_suara_tps').select('*'),
+      ]);
+
+      if (tpsRes.error) throw tpsRes.error;
+      if (kandidatRes.error) throw kandidatRes.error;
+      if (suaraRes.error) throw suaraRes.error;
+      if (rekapRes.error) throw rekapRes.error;
+
+      const semuaTPS = tpsRes.data || [];
+      const semuaKandidat = kandidatRes.data || [];
+      const semuaSuara = suaraRes.data || [];
+      const semuaRekap = rekapRes.data || [];
+
+      const hasil = semuaTPS.map((t) => {
+        const rekap = semuaRekap.find((r) => r.tps_id === t.id);
+        const suaraPerKandidat = semuaKandidat.map((k) => {
+          const s = semuaSuara.find((x) => x.tps_id === t.id && x.kandidat_id === k.id);
+          return { kandidat: k, jumlah: s?.jumlah_suara || 0 };
+        });
+
+        return {
+          tps: t,
+          rekap: rekap || { status: 'Belum Lapor', suara_sah: 0, suara_tidak_sah: 0 },
+          suaraPerKandidat,
+        };
+      });
+
+      setDataRealCount(hasil);
+    } catch (err: any) {
+      console.error('Error Supabase (Real Count):', err);
+      alert('Error saat mengambil data real count: ' + err.message);
+    }
+
+    setLoadingRealCount(false);
+  }
+
+  // Rekap total suara per kandidat, digabung dari semua TPS
+  const rekapTotalPerKandidat = useMemo(() => {
+    const totalPerKandidat: Record<string, { kandidat: any; total: number }> = {};
+
+    dataRealCount.forEach((row) => {
+      row.suaraPerKandidat.forEach((sp: any) => {
+        const id = sp.kandidat.id;
+        if (!totalPerKandidat[id]) {
+          totalPerKandidat[id] = { kandidat: sp.kandidat, total: 0 };
+        }
+        totalPerKandidat[id].total += sp.jumlah;
+      });
+    });
+
+    return Object.values(totalPerKandidat).sort(
+      (a, b) => a.kandidat.nomor_urut - b.kandidat.nomor_urut
+    );
+  }, [dataRealCount]);
+
+  const progresLaporTPS = useMemo(() => {
+    const total = dataRealCount.length;
+    const sudahFinal = dataRealCount.filter((r) => r.rekap.status === 'Sudah Final').length;
+    const sedangDihitung = dataRealCount.filter((r) => r.rekap.status === 'Sedang Dihitung').length;
+    return { total, sudahFinal, sedangDihitung, belum: total - sudahFinal - sedangDihitung };
+  }, [dataRealCount]);
+
+  function bukaInputSuara(row: any) {
+    const suaraAwal: Record<string, number> = {};
+    row.suaraPerKandidat.forEach((sp: any) => {
+      suaraAwal[sp.kandidat.id] = sp.jumlah;
+    });
+
+    setModalInputSuara({
+      tps_id: row.tps.id,
+      tps_nomor: row.tps.nomor_tps,
+      tps_nama: row.tps.nama_lokasi,
+      suara_sah: row.rekap.suara_sah || 0,
+      suara_tidak_sah: row.rekap.suara_tidak_sah || 0,
+      status: row.rekap.status || 'Belum Lapor',
+      suara_per_kandidat: suaraAwal,
+    });
+  }
+
+  async function simpanHasilSuara(e: React.FormEvent) {
+    e.preventDefault();
+    if (!modalInputSuara) return;
+
+    setLoadingSimpanRealCount(true);
+
+    try {
+      // 1. Upsert rekap suara sah/tidak sah/status per TPS
+      const { error: errRekap } = await supabase
+        .from('rekap_suara_tps')
+        .upsert(
+          {
+            tps_id: modalInputSuara.tps_id,
+            suara_sah: Number(modalInputSuara.suara_sah) || 0,
+            suara_tidak_sah: Number(modalInputSuara.suara_tidak_sah) || 0,
+            status: modalInputSuara.status,
+            diinput_oleh: user.nama_lengkap,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'tps_id' }
+        );
+
+      if (errRekap) throw errRekap;
+
+      // 2. Upsert jumlah suara tiap kandidat untuk TPS ini
+      const payloadSuara = dataKandidat.map((k) => ({
+        tps_id: modalInputSuara.tps_id,
+        kandidat_id: k.id,
+        jumlah_suara: Number(modalInputSuara.suara_per_kandidat[k.id]) || 0,
+        diinput_oleh: user.nama_lengkap,
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { error: errSuara } = await supabase
+        .from('hasil_suara')
+        .upsert(payloadSuara, { onConflict: 'tps_id,kandidat_id' });
+
+      if (errSuara) throw errSuara;
+
+      setModalInputSuara(null);
+      fetchRealCount();
+    } catch (err: any) {
+      alert('Gagal menyimpan hasil suara: ' + err.message);
+    }
+
+    setLoadingSimpanRealCount(false);
+  }
+
+  // ==========================================
+  // FUNGSI HARI H (KEHADIRAN PEMILIH)
+  // ==========================================
+  async function fetchHariH() {
+    setLoadingHariH(true);
+
+    let query = supabase
+      .from('penduduk')
+      .select('id, NAMA, NIK, TPS, RT, RW, sudah_hadir_tps, waktu_hadir_tps')
+      .eq('status_dpt', 'DPT');
+
+    if (filterTPS_HariH !== 'Semua') {
+      query = query.eq('TPS', filterTPS_HariH);
+    }
+
+    if (searchHariH) {
+      query = query.or(`NAMA.ilike.%${searchHariH}%,NIK.ilike.%${searchHariH}%`);
+    }
+
+    const { data, error } = await query.order('NAMA', { ascending: true }).limit(200);
+
+    if (error) {
+      console.error('Error Supabase (Hari H):', error);
+      alert('Error saat mengambil data kehadiran: ' + error.message);
+    } else {
+      setDataHariH(data || []);
+    }
+    setLoadingHariH(false);
+  }
+
+  async function toggleHadirPemilih(item: any) {
+    setLoadingToggleHadir(item.id);
+
+    const statusBaru = !item.sudah_hadir_tps;
+
+    const { error } = await supabase
+      .from('penduduk')
+      .update({
+        sudah_hadir_tps: statusBaru,
+        waktu_hadir_tps: statusBaru ? new Date().toISOString() : null,
+        dicatat_oleh: statusBaru ? user.nama_lengkap : null,
+      })
+      .eq('id', item.id);
+
+    setLoadingToggleHadir(null);
+
+    if (error) {
+      alert('Gagal mencatat kehadiran: ' + error.message);
+    } else {
+      fetchHariH();
+    }
+  }
+
+  // Rekap kehadiran per TPS, dihitung langsung dari seluruh data DPT
+  const [rekapKehadiranTPS, setRekapKehadiranTPS] = useState<any[]>([]);
+  const [loadingRekapKehadiran, setLoadingRekapKehadiran] = useState(false);
+
+  async function fetchRekapKehadiranTPS() {
+    setLoadingRekapKehadiran(true);
+
+    let semuaData: any[] = [];
+    let dariBaris = 0;
+    const ukuranHalaman = 1000;
+
+    try {
+      while (true) {
+        const { data, error } = await supabase
+          .from('penduduk')
+          .select('TPS, sudah_hadir_tps')
+          .eq('status_dpt', 'DPT')
+          .range(dariBaris, dariBaris + ukuranHalaman - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+
+        semuaData = semuaData.concat(data);
+        if (data.length < ukuranHalaman) break;
+        dariBaris += ukuranHalaman;
+      }
+
+      const grouped: Record<string, { total: number; hadir: number }> = {};
+      semuaData.forEach((item) => {
+        const key = String(item.TPS || 'Tanpa TPS').trim() || 'Tanpa TPS';
+        if (!grouped[key]) grouped[key] = { total: 0, hadir: 0 };
+        grouped[key].total += 1;
+        if (item.sudah_hadir_tps) grouped[key].hadir += 1;
+      });
+
+      const hasil = Object.keys(grouped)
+        .map((tps) => ({
+          tps,
+          total: grouped[tps].total,
+          hadir: grouped[tps].hadir,
+          persen: grouped[tps].total > 0
+            ? Math.round((grouped[tps].hadir / grouped[tps].total) * 100)
+            : 0,
+        }))
+        .sort((a, b) => a.tps.localeCompare(b.tps));
+
+      setRekapKehadiranTPS(hasil);
+    } catch (err: any) {
+      console.error('Error Supabase (Rekap Kehadiran):', err);
+    }
+
+    setLoadingRekapKehadiran(false);
+  }
+
   latestFetchRef.current = {
     fetchTugasCoklit,
     fetchStatistikCoklit,
@@ -3263,6 +4167,13 @@ async function fetchStatusLoginAkun() {
     fetchFunnelData,
     fetchDPS,
     fetchProgresDPSWilayah,
+    fetchKandidat,
+    fetchTPSMaster,
+    fetchSaksi,
+    fetchAnggotaKPPS,
+    fetchRealCount,
+    fetchHariH,
+    fetchRekapKehadiranTPS,
   };
 
   // ==========================================
@@ -4262,6 +5173,810 @@ async function fetchStatusLoginAkun() {
                   )}
                 </>
               )}
+            </div>
+          )}
+
+            {activeMenu === 'TPS' && (
+            <div className="max-w-6xl mx-auto pb-10">
+              <div className="flex justify-between items-end mb-6">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900">
+                    Tempat Pemungutan Suara
+                  </h2>
+                  <p className="text-sm text-slate-500 font-bold mt-1">
+                    Kelola lokasi TPS dan cakupan RT/RW masing-masing.
+                  </p>
+                </div>
+                {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                  <button
+                    onClick={bukaTambahTPS}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    Tambah TPS
+                  </button>
+                )}
+              </div>
+
+              {loadingTPSMaster ? (
+                <div className="flex justify-center py-20">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
+                </div>
+              ) : dataTPSMaster.length === 0 ? (
+                <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+                  Belum ada data TPS.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {dataTPSMaster.map((item) => (
+                    <div
+                      key={item.id}
+                      className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <span className="w-12 h-12 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-lg shrink-0">
+                          {item.nomor_tps}
+                        </span>
+                        <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full text-[10px] font-black uppercase">
+                          {jumlahDPTPerTPS[item.nomor_tps] || 0} DPT
+                        </span>
+                      </div>
+                      <h3 className="font-black text-slate-900 mb-1">
+                        {item.nama_lokasi || `TPS ${item.nomor_tps}`}
+                      </h3>
+                      <p className="text-xs font-bold text-slate-500">
+                        {item.alamat || 'Alamat belum diisi'}
+                      </p>
+                      <p className="text-xs font-bold text-slate-400 mt-1">
+                        Dusun {item.dusun || '-'}
+                        {item.rt_cakupan?.length > 0 &&
+                          ` · RT ${item.rt_cakupan.join(', ')}`}
+                        {item.rw_cakupan?.length > 0 &&
+                          ` / RW ${item.rw_cakupan.join(', ')}`}
+                      </p>
+
+                      <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
+                        <button
+                          onClick={() => bukaGoogleMapsTPS(item)}
+                          className="flex-1 py-2 bg-indigo-50 hover:bg-indigo-500 hover:text-white text-indigo-700 font-bold text-xs rounded-lg transition-colors border border-indigo-100 flex items-center justify-center gap-1.5"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                          </svg>
+                          Arahkan
+                        </button>
+                        {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                          <>
+                            <button
+                              onClick={() => bukaEditTPS(item)}
+                              className="px-4 py-2 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-lg transition-colors border border-slate-200"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => hapusTPS(item)}
+                              className="px-4 py-2 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-xs rounded-lg transition-colors border border-red-100"
+                            >
+                              Hapus
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeMenu === 'Kandidat' && (
+            <div className="max-w-6xl mx-auto pb-10">
+              <div className="flex justify-between items-end mb-6">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900">
+                    Kandidat Kepala Desa
+                  </h2>
+                  <p className="text-sm text-slate-500 font-bold mt-1">
+                    Kelola profil, visi, dan misi calon kepala desa.
+                  </p>
+                </div>
+                {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                  <button
+                    onClick={bukaTambahKandidat}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    Tambah Kandidat
+                  </button>
+                )}
+              </div>
+
+              {loadingKandidat ? (
+                <div className="flex justify-center py-20">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
+                </div>
+              ) : dataKandidat.length === 0 ? (
+                <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+                  Belum ada data kandidat.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {dataKandidat.map((k) => (
+                    <div
+                      key={k.id}
+                      className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col"
+                    >
+                      <div className="relative bg-slate-100 aspect-square flex items-center justify-center">
+                        {k.foto_url ? (
+                          <img src={k.foto_url} alt={k.nama} className="w-full h-full object-cover" />
+                        ) : (
+                          <svg className="w-20 h-20 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                          </svg>
+                        )}
+                        <span className="absolute top-3 left-3 w-10 h-10 rounded-full bg-emerald-600 text-white font-black flex items-center justify-center shadow-md">
+                          {k.nomor_urut}
+                        </span>
+                      </div>
+                      <div className="p-5 flex-1 flex flex-col">
+                        <h3 className="font-black text-lg text-slate-900 uppercase">
+                          {k.nama}
+                        </h3>
+                        {k.nama_wakil && (
+                          <p className="text-xs font-bold text-slate-500 mt-0.5">
+                            Wakil: {k.nama_wakil}
+                          </p>
+                        )}
+                        {k.visi && (
+                          <div className="mt-3">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                              Visi
+                            </p>
+                            <p className="text-sm font-bold text-slate-700 mt-1 line-clamp-3">
+                              {k.visi}
+                            </p>
+                          </div>
+                        )}
+                        {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                          <div className="flex gap-2 mt-auto pt-4 border-t border-slate-100 mt-4">
+                            <button
+                              onClick={() => bukaEditKandidat(k)}
+                              className="flex-1 py-2 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-lg transition-colors border border-slate-200"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => hapusKandidat(k)}
+                              className="px-4 py-2 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-xs rounded-lg transition-colors border border-red-100"
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+            {activeMenu === 'Saksi' && (
+            <div className="max-w-6xl mx-auto pb-10">
+              <div className="flex justify-between items-end mb-6">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900">
+                    Saksi
+                  </h2>
+                  <p className="text-sm text-slate-500 font-bold mt-1">
+                    Daftar saksi tiap kandidat per TPS, dan status kehadiran hari-H.
+                  </p>
+                </div>
+                {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                  <button
+                    onClick={bukaTambahSaksi}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    Tambah Saksi
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2 mb-6">
+                <button
+                  onClick={() => setFilterTPS_Saksi('Semua')}
+                  className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
+                    filterTPS_Saksi === 'Semua'
+                      ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                  }`}
+                >
+                  Semua TPS
+                </button>
+                {dataTPSMaster.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setFilterTPS_Saksi(t.nomor_tps)}
+                    className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
+                      filterTPS_Saksi === t.nomor_tps
+                        ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                  >
+                    TPS {t.nomor_tps}
+                  </button>
+                ))}
+              </div>
+
+              {loadingSaksi ? (
+                <div className="flex justify-center py-20">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
+                </div>
+              ) : dataSaksiFiltered.length === 0 ? (
+                <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+                  Belum ada data saksi untuk filter ini.
+                </div>
+              ) : (
+                <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">Nama</th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">Saksi Untuk</th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">TPS</th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">No HP</th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">Kehadiran</th>
+                        <th className="text-left p-4 font-black text-slate-600 uppercase text-xs">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dataSaksiFiltered.map((item) => (
+                        <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="p-4 font-bold uppercase">{item.nama}</td>
+                          <td className="p-4">
+                            {item.kandidat ? (
+                              <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded text-[10px] font-black uppercase">
+                                No. {item.kandidat.nomor_urut} · {item.kandidat.nama}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 text-xs">-</span>
+                            )}
+                          </td>
+                          <td className="p-4 font-bold">
+                            {item.tps ? `TPS ${item.tps.nomor_tps}` : '-'}
+                          </td>
+                          <td className="p-4 text-xs">{item.no_hp || '-'}</td>
+                          <td className="p-4">
+                            {(user.role === 'Super Admin' || user.role === 'Admin' || user.role === 'KPPS') ? (
+                              <button
+                                onClick={() => toggleHadirSaksi(item)}
+                                className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase border transition-all ${
+                                  item.status_hadir
+                                    ? 'bg-emerald-500 border-emerald-500 text-white'
+                                    : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                                }`}
+                              >
+                                {item.status_hadir ? '✓ Hadir' : 'Belum Hadir'}
+                              </button>
+                            ) : (
+                              <span
+                                className={`px-2.5 py-1 rounded text-[10px] font-black uppercase ${
+                                  item.status_hadir
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                    : 'bg-slate-100 text-slate-500 border border-slate-200'
+                                }`}
+                              >
+                                {item.status_hadir ? 'Hadir' : 'Belum Hadir'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                              <div className="flex gap-1.5">
+                                <button
+                                  onClick={() => bukaEditSaksi(item)}
+                                  className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-[10px] rounded-lg transition-colors border border-slate-200"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => hapusSaksi(item)}
+                                  className="px-2.5 py-1.5 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-[10px] rounded-lg transition-colors border border-red-100"
+                                >
+                                  Hapus
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeMenu === 'KPPS' && (
+            <div className="max-w-6xl mx-auto pb-10">
+              <div className="flex justify-between items-end mb-6">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900">
+                    Anggota KPPS
+                  </h2>
+                  <p className="text-sm text-slate-500 font-bold mt-1">
+                    Susunan petugas KPPS per TPS untuk keperluan SK dan dokumentasi.
+                  </p>
+                </div>
+                {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                  <button
+                    onClick={bukaTambahAnggotaKPPS}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    Tambah Anggota
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2 mb-6">
+                <button
+                  onClick={() => setFilterTPS_KPPS('Semua')}
+                  className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
+                    filterTPS_KPPS === 'Semua'
+                      ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                  }`}
+                >
+                  Semua TPS
+                </button>
+                {dataTPSMaster.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setFilterTPS_KPPS(t.nomor_tps)}
+                    className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
+                      filterTPS_KPPS === t.nomor_tps
+                        ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                  >
+                    TPS {t.nomor_tps}
+                  </button>
+                ))}
+              </div>
+
+              {loadingAnggotaKPPS ? (
+                <div className="flex justify-center py-20">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
+                </div>
+              ) : dataAnggotaKPPSFiltered.length === 0 ? (
+                <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+                  Belum ada anggota KPPS untuk filter ini.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {dataAnggotaKPPSFiltered.map((item) => (
+                    <div
+                      key={item.id}
+                      className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-black text-slate-900 uppercase">
+                            {item.nama}
+                          </h3>
+                          <p className="text-xs font-bold text-slate-500">
+                            {item.tps ? `TPS ${item.tps.nomor_tps}` : 'Belum ditugaskan'}
+                          </p>
+                        </div>
+                        <span className="px-2.5 py-1 bg-teal-50 text-teal-700 border border-teal-100 rounded-full text-[10px] font-black uppercase whitespace-nowrap">
+                          {item.jabatan}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-slate-400">
+                        {item.no_hp || 'No HP belum diisi'}
+                      </p>
+                      {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                        <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
+                          <button
+                            onClick={() => bukaEditAnggotaKPPS(item)}
+                            className="flex-1 py-2 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-lg transition-colors border border-slate-200"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => hapusAnggotaKPPS(item)}
+                            className="px-4 py-2 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-xs rounded-lg transition-colors border border-red-100"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+            {activeMenu === 'Real Count' && (
+            <div className="max-w-6xl mx-auto pb-10">
+              <div className="mb-6">
+                <h2 className="text-2xl font-black text-slate-900">
+                  Real Count
+                </h2>
+                <p className="text-sm text-slate-500 font-bold mt-1">
+                  Rekap hasil penghitungan suara real-time dari seluruh TPS.
+                </p>
+              </div>
+
+              {/* PROGRES PELAPORAN */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">
+                    Progres Pelaporan TPS
+                  </h3>
+                  <span className="text-sm font-black text-slate-500">
+                    {progresLaporTPS.sudahFinal}/{progresLaporTPS.total} TPS
+                  </span>
+                </div>
+                <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden flex">
+                  {progresLaporTPS.total > 0 && (
+                    <>
+                      <div
+                        className="h-full bg-emerald-500"
+                        style={{
+                          width: `${(progresLaporTPS.sudahFinal / progresLaporTPS.total) * 100}%`,
+                        }}
+                      ></div>
+                      <div
+                        className="h-full bg-yellow-400"
+                        style={{
+                          width: `${(progresLaporTPS.sedangDihitung / progresLaporTPS.total) * 100}%`,
+                        }}
+                      ></div>
+                    </>
+                  )}
+                </div>
+                <div className="flex gap-4 mt-3 text-xs font-bold">
+                  <span className="flex items-center gap-1.5 text-emerald-600">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                    Sudah Final ({progresLaporTPS.sudahFinal})
+                  </span>
+                  <span className="flex items-center gap-1.5 text-yellow-600">
+                    <span className="w-2.5 h-2.5 rounded-full bg-yellow-400"></span>
+                    Sedang Dihitung ({progresLaporTPS.sedangDihitung})
+                  </span>
+                  <span className="flex items-center gap-1.5 text-slate-400">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+                    Belum Lapor ({progresLaporTPS.belum})
+                  </span>
+                </div>
+              </div>
+
+              {/* REKAP TOTAL PER KANDIDAT */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
+                <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide mb-4">
+                  Total Suara Masuk
+                </h3>
+                {rekapTotalPerKandidat.length === 0 ? (
+                  <p className="text-sm font-bold text-slate-400 text-center py-4">
+                    Belum ada kandidat / hasil suara.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {(() => {
+                      const grandTotal = rekapTotalPerKandidat.reduce((s, r) => s + r.total, 0);
+                      return rekapTotalPerKandidat.map((r) => {
+                        const persen = grandTotal > 0 ? Math.round((r.total / grandTotal) * 100) : 0;
+                        return (
+                          <div key={r.kandidat.id}>
+                            <div className="flex justify-between items-center mb-1.5">
+                              <span className="text-sm font-black text-slate-700">
+                                No. {r.kandidat.nomor_urut} · {r.kandidat.nama}
+                              </span>
+                              <span className="text-sm font-black text-slate-800">
+                                {r.total.toLocaleString('id-ID')} suara ({persen}%)
+                              </span>
+                            </div>
+                            <div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-emerald-600 transition-all rounded-full"
+                                style={{ width: `${persen}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* DETAIL PER TPS */}
+              <div className="mb-4">
+                <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">
+                  Detail per TPS
+                </h3>
+              </div>
+
+              {loadingRealCount ? (
+                <div className="flex justify-center py-20">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
+                </div>
+              ) : dataRealCount.length === 0 ? (
+                <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+                  Belum ada data TPS. Tambahkan TPS dulu di menu TPS.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {dataRealCount.map((row) => {
+                    const gayaStatus: Record<string, string> = {
+                      'Belum Lapor': 'bg-slate-100 text-slate-500 border-slate-200',
+                      'Sedang Dihitung': 'bg-yellow-50 text-yellow-700 border-yellow-200',
+                      'Sudah Final': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                    };
+                    const totalSuaraTPS = row.suaraPerKandidat.reduce(
+                      (s: number, sp: any) => s + sp.jumlah,
+                      0
+                    );
+
+                    return (
+                      <div
+                        key={row.tps.id}
+                        className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5"
+                      >
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h4 className="font-black text-slate-900">
+                              TPS {row.tps.nomor_tps}
+                            </h4>
+                            <p className="text-xs font-bold text-slate-400">
+                              {row.tps.nama_lokasi || '-'}
+                            </p>
+                          </div>
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border whitespace-nowrap ${gayaStatus[row.rekap.status]}`}
+                          >
+                            {row.rekap.status}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1 mb-3">
+                          {row.suaraPerKandidat.map((sp: any) => (
+                            <div key={sp.kandidat.id} className="flex justify-between text-xs font-bold">
+                              <span className="text-slate-500">
+                                No. {sp.kandidat.nomor_urut} {sp.kandidat.nama}
+                              </span>
+                              <span className="text-slate-800">{sp.jumlah}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex justify-between text-[10px] font-bold text-slate-400 border-t border-slate-100 pt-2 mb-4">
+                          <span>Sah: {row.rekap.suara_sah || 0}</span>
+                          <span>Tidak Sah: {row.rekap.suara_tidak_sah || 0}</span>
+                          <span>Total: {totalSuaraTPS}</span>
+                        </div>
+
+                        {(user.role === 'Super Admin' || user.role === 'Admin' || user.role === 'KPPS') && (
+                          <button
+                            onClick={() => bukaInputSuara(row)}
+                            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all"
+                          >
+                            {row.rekap.status === 'Belum Lapor' ? 'Input Hasil' : 'Edit Hasil'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+            {activeMenu === 'Hari H' && (
+            <div className="max-w-6xl mx-auto pb-10">
+              <div className="mb-6">
+                <h2 className="text-2xl font-black text-slate-900">
+                  Hari H — Kehadiran Pemilih
+                </h2>
+                <p className="text-sm text-slate-500 font-bold mt-1">
+                  Cari nama pemilih dan tandai hadir saat mereka datang ke TPS.
+                </p>
+              </div>
+
+              {/* REKAP KEHADIRAN PER TPS */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
+                <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide mb-4">
+                  Kehadiran per TPS
+                </h3>
+                {loadingRekapKehadiran ? (
+                  <div className="flex justify-center py-6">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-4 border-emerald-600"></div>
+                  </div>
+                ) : rekapKehadiranTPS.length === 0 ? (
+                  <p className="text-sm font-bold text-slate-400 text-center py-4">
+                    Belum ada data DPT.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {rekapKehadiranTPS.map((r) => (
+                      <div key={r.tps} className="bg-slate-50 rounded-xl p-4">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-sm font-black text-slate-700">
+                            TPS {r.tps}
+                          </span>
+                          <span className="text-sm font-black text-emerald-600">
+                            {r.persen}%
+                          </span>
+                        </div>
+                        <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden mb-2">
+                          <div
+                            className="h-full bg-emerald-500 rounded-full transition-all"
+                            style={{ width: `${r.persen}%` }}
+                          ></div>
+                        </div>
+                        <p className="text-xs font-bold text-slate-500">
+                          {r.hadir} dari {r.total} pemilih
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* SEARCH & FILTER */}
+              <div className="flex flex-wrap gap-3 mb-4">
+                <input
+                  type="text"
+                  placeholder="Cari Nama atau NIK pemilih..."
+                  value={searchHariH}
+                  onChange={(e) => setSearchHariH(e.target.value)}
+                  className="flex-1 min-w-[220px] p-4 border-2 border-slate-200 rounded-xl font-bold focus:border-emerald-500 outline-none shadow-sm"
+                />
+                <select
+                  value={filterTPS_HariH}
+                  onChange={(e) => setFilterTPS_HariH(e.target.value)}
+                  className="p-4 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  <option value="Semua">Semua TPS</option>
+                  {dataTPSMaster.map((t) => (
+                    <option key={t.id} value={t.nomor_tps}>
+                      TPS {t.nomor_tps}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {!searchHariH && filterTPS_HariH === 'Semua' && (
+                <div className="bg-indigo-50 border border-indigo-200 text-indigo-700 p-4 rounded-xl mb-6 text-sm font-bold shadow-sm">
+                  Ketik nama atau pilih TPS untuk mencari pemilih dengan cepat.
+                  Menampilkan maksimal 200 data pertama.
+                </div>
+              )}
+
+              {loadingHariH ? (
+                <div className="flex justify-center py-20">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
+                </div>
+              ) : dataHariH.length === 0 ? (
+                <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+                  Tidak ada pemilih yang cocok dengan pencarian/filter.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {dataHariH.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`bg-white p-4 md:p-5 rounded-2xl border shadow-sm flex flex-wrap items-center justify-between gap-3 ${
+                        item.sudah_hadir_tps ? 'border-emerald-200' : 'border-slate-200'
+                      }`}
+                    >
+                      <div>
+                        <p className="font-black text-slate-800 uppercase">{item.NAMA}</p>
+                        <p className="text-xs font-bold text-slate-400">
+                          NIK {item.NIK} · TPS {item.TPS || '-'} · RT {item.RT}/RW {item.RW}
+                        </p>
+                        {item.sudah_hadir_tps && item.waktu_hadir_tps && (
+                          <p className="text-[10px] font-bold text-emerald-600 mt-1">
+                            Hadir pukul{' '}
+                            {new Date(item.waktu_hadir_tps).toLocaleTimeString('id-ID', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => toggleHadirPemilih(item)}
+                        disabled={loadingToggleHadir === item.id}
+                        className={`px-5 py-2.5 rounded-xl text-sm font-black uppercase tracking-wide transition-all flex items-center gap-2 disabled:opacity-50 ${
+                          item.sudah_hadir_tps
+                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {loadingToggleHadir === item.id ? (
+                          '...'
+                        ) : item.sudah_hadir_tps ? (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            Hadir
+                          </>
+                        ) : (
+                          'Tandai Hadir'
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeMenu === 'Peta TPS' && (
+            <div className="max-w-6xl mx-auto pb-10">
+              <div className="mb-6">
+                <h2 className="text-2xl font-black text-slate-900">
+                  Peta Lokasi TPS
+                </h2>
+                <p className="text-sm text-slate-500 font-bold mt-1">
+                  Klik marker untuk lihat detail dan navigasi langsung lewat Google Maps.
+                </p>
+              </div>
+
+              {dataTPSMaster.filter((t) => t.latitude && t.longitude).length === 0 ? (
+                <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
+                  Belum ada TPS dengan titik koordinat. Tambahkan lat/long lewat menu TPS.
+                </div>
+              ) : (
+                <div
+                  ref={petaRef}
+                  className="w-full h-[500px] rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+                  style={{ zIndex: 0 }}
+                ></div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-6">
+                {dataTPSMaster.map((t) => (
+                  <div
+                    key={t.id}
+                    className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between gap-3"
+                  >
+                    <div>
+                      <p className="font-black text-sm text-slate-800">TPS {t.nomor_tps}</p>
+                      <p className="text-xs font-bold text-slate-400">
+                        {t.nama_lokasi || 'Lokasi belum diisi'}
+                      </p>
+                    </div>
+                    {t.latitude && t.longitude ? (
+                      <button
+                        onClick={() => bukaGoogleMapsTPS(t)}
+                        className="px-3 py-2 bg-indigo-50 hover:bg-indigo-500 hover:text-white text-indigo-700 font-bold text-xs rounded-lg transition-colors border border-indigo-100 whitespace-nowrap"
+                      >
+                        Arahkan
+                      </button>
+                    ) : (
+                      <span className="text-[10px] font-bold text-slate-300 uppercase whitespace-nowrap">
+                        Belum ada titik
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -6522,6 +8237,13 @@ async function fetchStatusLoginAkun() {
             activeMenu !== 'DPT/Tambahan' &&
             activeMenu !== 'Aktivitas Login' &&
             activeMenu !== 'Tahapan Pilkades' &&
+            activeMenu !== 'Kandidat' &&
+            activeMenu !== 'TPS' &&
+            activeMenu !== 'Saksi' &&
+            activeMenu !== 'KPPS' &&
+            activeMenu !== 'Real Count' &&
+            activeMenu !== 'Hari H' &&
+            activeMenu !== 'Peta TPS' &&
             activeMenu !== '' && (
               <div className="text-center mt-20">
                 <div className="w-20 h-20 bg-slate-200 rounded-full mx-auto mb-4 flex items-center justify-center">
@@ -8512,6 +10234,671 @@ async function fetchStatusLoginAkun() {
                   className="px-6 py-3 bg-slate-700 text-white rounded-xl text-sm font-bold hover:bg-slate-800 shadow-md"
                 >
                   {loadingSimpanEditDaftarPemilih ? 'Menyimpan...' : 'Simpan Perubahan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+          {modalKandidat && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-emerald-600 p-5 flex justify-between items-center">
+              <h2 className="text-lg font-black text-white">
+                {modalKandidat.id ? 'Edit Kandidat' : 'Tambah Kandidat'}
+              </h2>
+              <button
+                onClick={() => setModalKandidat(null)}
+                className="text-white/80 hover:text-white bg-emerald-700 rounded-full p-1"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={simpanKandidat} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-24 h-24 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border-2 border-slate-200">
+                    {modalKandidat.foto_url ? (
+                      <img src={modalKandidat.foto_url} alt="Foto" className="w-full h-full object-cover" />
+                    ) : (
+                      <svg className="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                      </svg>
+                    )}
+                  </div>
+                  <label className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl cursor-pointer">
+                    {loadingFotoKandidat ? 'Mengupload...' : 'Upload Foto'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleUploadFotoKandidat}
+                      className="hidden"
+                      disabled={loadingFotoKandidat}
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Nomor Urut
+                    </label>
+                    <input
+                      required
+                      type="number"
+                      min={1}
+                      value={modalKandidat.nomor_urut}
+                      onChange={(e) =>
+                        setModalKandidat({ ...modalKandidat, nomor_urut: e.target.value })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Nama Wakil (opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={modalKandidat.nama_wakil}
+                      onChange={(e) =>
+                        setModalKandidat({ ...modalKandidat, nama_wakil: e.target.value })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Nama Lengkap Calon Kepala Desa
+                    </label>
+                    <input
+                      required
+                      type="text"
+                      value={modalKandidat.nama}
+                      onChange={(e) =>
+                        setModalKandidat({ ...modalKandidat, nama: e.target.value.toUpperCase() })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Visi
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={modalKandidat.visi}
+                      onChange={(e) =>
+                        setModalKandidat({ ...modalKandidat, visi: e.target.value })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Misi
+                    </label>
+                    <textarea
+                      rows={4}
+                      value={modalKandidat.misi}
+                      onChange={(e) =>
+                        setModalKandidat({ ...modalKandidat, misi: e.target.value })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setModalKandidat(null)}
+                  className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-100"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={loadingSimpanKandidat}
+                  className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 shadow-md flex items-center gap-2"
+                >
+                  {loadingSimpanKandidat ? 'Menyimpan...' : 'Simpan Kandidat'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+        {modalTPS && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-indigo-600 p-5 flex justify-between items-center">
+              <h2 className="text-lg font-black text-white">
+                {modalTPS.id ? 'Edit TPS' : 'Tambah TPS'}
+              </h2>
+              <button
+                onClick={() => setModalTPS(null)}
+                className="text-white/80 hover:text-white bg-indigo-700 rounded-full p-1"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={simpanTPS} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Nomor TPS
+                    </label>
+                    <input
+                      required
+                      type="text"
+                      placeholder="Misal: 01"
+                      value={modalTPS.nomor_tps}
+                      onChange={(e) => setModalTPS({ ...modalTPS, nomor_tps: e.target.value })}
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    />
+                    <p className="text-[10px] font-bold text-slate-400 mt-1">
+                      Harus sama persis dengan nilai kolom TPS di data pemilih.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Nama Lokasi
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Misal: Balai Dusun I"
+                      value={modalTPS.nama_lokasi}
+                      onChange={(e) => setModalTPS({ ...modalTPS, nama_lokasi: e.target.value })}
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Alamat Lengkap
+                    </label>
+                    <input
+                      type="text"
+                      value={modalTPS.alamat}
+                      onChange={(e) => setModalTPS({ ...modalTPS, alamat: e.target.value })}
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Dusun
+                    </label>
+                    <select
+                      value={modalTPS.dusun}
+                      onChange={(e) => setModalTPS({ ...modalTPS, dusun: e.target.value })}
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih Dusun --</option>
+                      {DAFTAR_DUSUN.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Keterangan (opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={modalTPS.keterangan}
+                      onChange={(e) => setModalTPS({ ...modalTPS, keterangan: e.target.value })}
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">
+                      Cakupan RT
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {DAFTAR_RT.map((rt) => {
+                        const isChecked = (modalTPS.rt_cakupan || []).includes(rt);
+                        return (
+                          <button
+                            key={rt}
+                            type="button"
+                            onClick={() => toggleRTCakupanTPS(rt)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
+                              isChecked
+                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                          >
+                            RT {rt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">
+                      Cakupan RW
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {DAFTAR_RW.map((rw) => {
+                        const isChecked = (modalTPS.rw_cakupan || []).includes(rw);
+                        return (
+                          <button
+                            key={rw}
+                            type="button"
+                            onClick={() => toggleRWCakupanTPS(rw)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
+                              isChecked
+                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                          >
+                            RW {rw}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Latitude
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Misal: -7.123456"
+                      value={modalTPS.latitude}
+                      onChange={(e) => setModalTPS({ ...modalTPS, latitude: e.target.value })}
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Longitude
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Misal: 109.123456"
+                      value={modalTPS.longitude}
+                      onChange={(e) => setModalTPS({ ...modalTPS, longitude: e.target.value })}
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2 bg-indigo-50 border border-indigo-100 rounded-xl p-3">
+                    <p className="text-xs font-bold text-indigo-700">
+                      Tips: buka Google Maps di HP, tekan lama titik lokasi TPS,
+                      koordinat otomatis muncul di kotak pencarian atas —
+                      tinggal salin angka lat/long-nya ke sini.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setModalTPS(null)}
+                  className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-100"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={loadingSimpanTPS}
+                  className="px-6 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-md flex items-center gap-2"
+                >
+                  {loadingSimpanTPS ? 'Menyimpan...' : 'Simpan TPS'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+        {modalSaksi && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-emerald-600 p-5 flex justify-between items-center">
+              <h2 className="text-lg font-black text-white">
+                {modalSaksi.id ? 'Edit Saksi' : 'Tambah Saksi'}
+              </h2>
+              <button
+                onClick={() => setModalSaksi(null)}
+                className="text-white/80 hover:text-white bg-emerald-700 rounded-full p-1"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={simpanSaksi} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    Nama Lengkap
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={modalSaksi.nama}
+                    onChange={(e) => setModalSaksi({ ...modalSaksi, nama: e.target.value.toUpperCase() })}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    Saksi Untuk Kandidat
+                  </label>
+                  <select
+                    value={modalSaksi.kandidat_id}
+                    onChange={(e) => setModalSaksi({ ...modalSaksi, kandidat_id: e.target.value })}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="">-- Pilih Kandidat --</option>
+                    {dataKandidat.map((k) => (
+                      <option key={k.id} value={k.id}>
+                        No. {k.nomor_urut} · {k.nama}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    Ditugaskan di TPS
+                  </label>
+                  <select
+                    value={modalSaksi.tps_id}
+                    onChange={(e) => setModalSaksi({ ...modalSaksi, tps_id: e.target.value })}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="">-- Pilih TPS --</option>
+                    {dataTPSMaster.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        TPS {t.nomor_tps} {t.nama_lokasi ? `- ${t.nama_lokasi}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    NIK (opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={modalSaksi.nik}
+                    onChange={(e) => setModalSaksi({ ...modalSaksi, nik: e.target.value })}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    No HP
+                  </label>
+                  <input
+                    type="text"
+                    value={modalSaksi.no_hp}
+                    onChange={(e) => setModalSaksi({ ...modalSaksi, no_hp: e.target.value })}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setModalSaksi(null)}
+                  className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-100"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={loadingSimpanSaksi}
+                  className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 shadow-md flex items-center gap-2"
+                >
+                  {loadingSimpanSaksi ? 'Menyimpan...' : 'Simpan Saksi'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {modalAnggotaKPPS && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-teal-600 p-5 flex justify-between items-center">
+              <h2 className="text-lg font-black text-white">
+                {modalAnggotaKPPS.id ? 'Edit Anggota KPPS' : 'Tambah Anggota KPPS'}
+              </h2>
+              <button
+                onClick={() => setModalAnggotaKPPS(null)}
+                className="text-white/80 hover:text-white bg-teal-700 rounded-full p-1"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={simpanAnggotaKPPS} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    Nama Lengkap
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={modalAnggotaKPPS.nama}
+                    onChange={(e) =>
+                      setModalAnggotaKPPS({ ...modalAnggotaKPPS, nama: e.target.value.toUpperCase() })
+                    }
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    Jabatan
+                  </label>
+                  <select
+                    value={modalAnggotaKPPS.jabatan}
+                    onChange={(e) => setModalAnggotaKPPS({ ...modalAnggotaKPPS, jabatan: e.target.value })}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-500 cursor-pointer"
+                  >
+                    <option value="Ketua">Ketua</option>
+                    <option value="Anggota 1">Anggota 1</option>
+                    <option value="Anggota 2">Anggota 2</option>
+                    <option value="Anggota 3">Anggota 3</option>
+                    <option value="Anggota 4">Anggota 4</option>
+                    <option value="Anggota 5">Anggota 5</option>
+                    <option value="Anggota 6">Anggota 6</option>
+                    <option value="Linmas">Linmas</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    Ditugaskan di TPS
+                  </label>
+                  <select
+                    value={modalAnggotaKPPS.tps_id}
+                    onChange={(e) => setModalAnggotaKPPS({ ...modalAnggotaKPPS, tps_id: e.target.value })}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-500 cursor-pointer"
+                  >
+                    <option value="">-- Pilih TPS --</option>
+                    {dataTPSMaster.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        TPS {t.nomor_tps} {t.nama_lokasi ? `- ${t.nama_lokasi}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    NIK (opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={modalAnggotaKPPS.nik}
+                    onChange={(e) => setModalAnggotaKPPS({ ...modalAnggotaKPPS, nik: e.target.value })}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">
+                    No HP
+                  </label>
+                  <input
+                    type="text"
+                    value={modalAnggotaKPPS.no_hp}
+                    onChange={(e) => setModalAnggotaKPPS({ ...modalAnggotaKPPS, no_hp: e.target.value })}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setModalAnggotaKPPS(null)}
+                  className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-100"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={loadingSimpanAnggotaKPPS}
+                  className="px-6 py-3 bg-teal-600 text-white rounded-xl text-sm font-bold hover:bg-teal-700 shadow-md flex items-center gap-2"
+                >
+                  {loadingSimpanAnggotaKPPS ? 'Menyimpan...' : 'Simpan Anggota'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {modalInputSuara && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-emerald-600 p-5 flex justify-between items-center">
+              <div>
+                <h2 className="text-lg font-black text-white">
+                  Input Hasil Suara
+                </h2>
+                <p className="text-xs font-bold text-emerald-100 mt-0.5">
+                  TPS {modalInputSuara.tps_nomor} {modalInputSuara.tps_nama ? `- ${modalInputSuara.tps_nama}` : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => setModalInputSuara(null)}
+                className="text-white/80 hover:text-white bg-emerald-700 rounded-full p-1"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={simpanHasilSuara} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">
+                    Status Penghitungan
+                  </label>
+                  <select
+                    value={modalInputSuara.status}
+                    onChange={(e) =>
+                      setModalInputSuara({ ...modalInputSuara, status: e.target.value })
+                    }
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="Belum Lapor">Belum Lapor</option>
+                    <option value="Sedang Dihitung">Sedang Dihitung</option>
+                    <option value="Sudah Final">Sudah Final</option>
+                  </select>
+                </div>
+
+                <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">
+                    Jumlah Suara per Kandidat
+                  </p>
+                  <div className="space-y-3">
+                    {dataKandidat.map((k) => (
+                      <div key={k.id} className="flex items-center gap-3">
+                        <span className="w-8 h-8 rounded-full bg-emerald-600 text-white text-xs font-black flex items-center justify-center shrink-0">
+                          {k.nomor_urut}
+                        </span>
+                        <span className="flex-1 text-sm font-bold text-slate-700">
+                          {k.nama}
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={modalInputSuara.suara_per_kandidat[k.id] || 0}
+                          onChange={(e) =>
+                            setModalInputSuara({
+                              ...modalInputSuara,
+                              suara_per_kandidat: {
+                                ...modalInputSuara.suara_per_kandidat,
+                                [k.id]: e.target.value,
+                              },
+                            })
+                          }
+                          className="w-24 p-2.5 border-2 border-slate-200 rounded-lg font-black text-sm text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Suara Sah
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={modalInputSuara.suara_sah}
+                      onChange={(e) =>
+                        setModalInputSuara({ ...modalInputSuara, suara_sah: e.target.value })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      Suara Tidak Sah
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={modalInputSuara.suara_tidak_sah}
+                      onChange={(e) =>
+                        setModalInputSuara({ ...modalInputSuara, suara_tidak_sah: e.target.value })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setModalInputSuara(null)}
+                  className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-100"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={loadingSimpanRealCount}
+                  className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 shadow-md flex items-center gap-2"
+                >
+                  {loadingSimpanRealCount ? 'Menyimpan...' : 'Simpan Hasil'}
                 </button>
               </div>
             </form>
