@@ -35,6 +35,9 @@ const DAFTAR_RT = Array.from({ length: 3 }, (_, i) =>
 const DAFTAR_RW = Array.from({ length: 6 }, (_, i) =>
   String(i + 1).padStart(3, '0')
 );
+const DAFTAR_TPS = Array.from({ length: 15 }, (_, i) =>
+  String(i + 1).padStart(2, '0')
+);
 
 const BATAS_ONLINE_MENIT = 2;
 
@@ -8846,8 +8849,7 @@ async function fetchStatusLoginAkun() {
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       TPS
                     </label>
-                    <input
-                      type="text"
+                    <select
                       value={modalPemilihBaru.TPS}
                       onChange={(e) =>
                         setModalPemilihBaru({
@@ -8856,7 +8858,13 @@ async function fetchStatusLoginAkun() {
                         })
                       }
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
-                    />
+                    >
+                      <option value="">-- Pilih TPS --</option>
+                {DAFTAR_TPS.map((tps) => (
+                  <option key={tps} value={tps}>TPS {tps}</option>
+                ))}
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
@@ -9071,14 +9079,18 @@ async function fetchStatusLoginAkun() {
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">TPS</label>
-              <input
-                type="text"
+              <select
                 value={modalEditPemilihBaru.TPS}
                 onChange={(e) =>
                   setModalEditPemilihBaru({ ...modalEditPemilihBaru, TPS: e.target.value })
                 }
                 className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
-              />
+              >
+                <option value="">-- Pilih TPS --</option>
+                {DAFTAR_TPS.map((tps) => (
+                  <option key={tps} value={tps}>TPS {tps}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">RT</label>
@@ -9294,8 +9306,7 @@ async function fetchStatusLoginAkun() {
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       TPS
                     </label>
-                    <input
-                      type="text"
+                    <select
                       value={modalEditCoklit.TPS}
                       onChange={(e) =>
                         setModalEditCoklit({
@@ -9303,8 +9314,14 @@ async function fetchStatusLoginAkun() {
                           TPS: e.target.value,
                         })
                       }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
-                    />
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih TPS --</option>
+                      {DAFTAR_TPS.map((tps) => (
+                        <option key={tps} value={tps}>TPS {tps}</option>
+                      ))}
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
@@ -9615,6 +9632,27 @@ async function fetchStatusLoginAkun() {
                       ))}
                     </select>
                   </div>
+                   <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">
+                      TPS
+                    </label>
+                    <select
+                      value={modalKoreksiEdit.TPS}
+                      onChange={(e) =>
+                        setModalKoreksiEdit({
+                          ...modalKoreksiEdit,
+                          TPS: e.target.value,
+                        })
+                      }
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih TPS --</option>
+                      {DAFTAR_TPS.map((tps) => (
+                        <option key={tps} value={tps}>TPS {tps}</option>
+                      ))}
+                      ))}
+                    </select>
+                  </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       RT
@@ -9895,14 +9933,19 @@ async function fetchStatusLoginAkun() {
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">
-                TPS <span className="text-slate-300 normal-case">(opsional)</span>
+                TPS <span className="text-slate-300 normal-case"></span>
               </label>
-              <input
-                type="text"
+              <select
+                required
                 value={modalPerbaikiBermasalah.TPS || ''}
                 onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, TPS: e.target.value })}
-                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
-              />
+                className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+              >
+                <option value="">-- Pilih TPS --</option>
+                {DAFTAR_TPS.map((tps) => (
+                  <option key={tps} value={tps}>TPS {tps}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">RT</label>
@@ -10121,8 +10164,7 @@ async function fetchStatusLoginAkun() {
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       TPS
                     </label>
-                    <input
-                      type="text"
+                     <select
                       value={modalEditDaftarPemilih.TPS}
                       onChange={(e) =>
                         setModalEditDaftarPemilih({
@@ -10130,8 +10172,13 @@ async function fetchStatusLoginAkun() {
                           TPS: e.target.value,
                         })
                       }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
-                    />
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih TPS --</option>
+                    {DAFTAR_TPS.map((tps) => (
+                      <option key={tps} value={tps}>TPS {tps}</option>
+                    ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
@@ -10391,21 +10438,21 @@ async function fetchStatusLoginAkun() {
             <form onSubmit={simpanTPS} className="flex flex-col flex-1 overflow-hidden">
               <div className="p-6 overflow-y-auto flex-1 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+                    <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
-                      Nomor TPS
+                      Nomor TPS 
                     </label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="Misal: 01"
-                      value={modalTPS.nomor_tps}
-                      onChange={(e) => setModalTPS({ ...modalTPS, nomor_tps: e.target.value })}
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"
-                    />
-                    <p className="text-[10px] font-bold text-slate-400 mt-1">
-                      Harus sama persis dengan nilai kolom TPS di data pemilih.
-                    </p>
+                    <select
+                      value={modalTPS.tps}
+                      onChange={(e) => setModalTPS({ ...modalTPS, tps: e.target.value })}
+                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih TPS --</option>
+                      {DAFTAR_TPS.map((tps) => (
+                        <option key={tps} value={tps}>TPS {tps}</option>
+                      ))}
+                    </select>
+                  </div>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
@@ -10537,7 +10584,6 @@ async function fetchStatusLoginAkun() {
                       tinggal salin angka lat/long-nya ke sini.
                     </p>
                   </div>
-                </div>
               </div>
 
               <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
@@ -10716,7 +10762,8 @@ async function fetchStatusLoginAkun() {
                     <option value="Anggota 4">Anggota 4</option>
                     <option value="Anggota 5">Anggota 5</option>
                     <option value="Anggota 6">Anggota 6</option>
-                    <option value="Linmas">Linmas</option>
+                    <option value="Linmas 1">Linmas 1</option>
+                    <option value="Linmas 2">Linmas 2</option>
                   </select>
                 </div>
                 <div>
