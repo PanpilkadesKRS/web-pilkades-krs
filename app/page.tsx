@@ -9648,7 +9648,6 @@ async function fetchStatusLoginAkun() {
                       {DAFTAR_TPS.map((tps) => (
                         <option key={tps} value={tps}>TPS {tps}</option>
                       ))}
-                      ))}
                     </select>
                   </div>
                   <div>
