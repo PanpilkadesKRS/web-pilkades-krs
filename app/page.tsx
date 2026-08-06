@@ -275,6 +275,21 @@ export default function Home() {
   const [loadingSimpanTPS, setLoadingSimpanTPS] = useState(false);
   const [jumlahDPTPerTPS, setJumlahDPTPerTPS] = useState<Record<string, number>>({});
 
+  // --- STATE DAFTAR PEMILIH PER TPS ---
+  const [modalDaftarTPS, setModalDaftarTPS] = useState<any | null>(null);
+  const [dataPemilihPerTPS, setDataPemilihPerTPS] = useState<any[]>([]);
+  const [loadingPemilihPerTPS, setLoadingPemilihPerTPS] = useState(false);
+  const [dataBelumDitentukan, setDataBelumDitentukan] = useState<any[]>([]);
+  const [loadingBelumDitentukan, setLoadingBelumDitentukan] = useState(false);
+  const [filterRT_BelumDitentukan, setFilterRT_BelumDitentukan] = useState('Semua');
+  const [filterRW_BelumDitentukan, setFilterRW_BelumDitentukan] = useState('Semua');
+  const [selectedBelumDitentukan, setSelectedBelumDitentukan] = useState<string[]>([]);
+  const [loadingAssignMassal, setLoadingAssignMassal] = useState(false);
+  const [tabDaftarTPS, setTabDaftarTPS] = useState<'SudahDiTPS' | 'BelumDitentukan'>('SudahDiTPS');
+
+  const [searchSudahDiTPS, setSearchSudahDiTPS] = useState('');
+  const [searchBelumDitentukan, setSearchBelumDitentukan] = useState('');
+
   // --- STATE REAL COUNT ---
   const [dataRealCount, setDataRealCount] = useState<any[]>([]);
   const [loadingRealCount, setLoadingRealCount] = useState(false);
@@ -898,6 +913,11 @@ export default function Home() {
       supabase.removeChannel(channel);
     };
   }, [activeMenu]);
+
+  useEffect(() => {
+    if (!modalDaftarTPS || tabDaftarTPS !== 'BelumDitentukan') return;
+    fetchBelumDitentukan();
+  }, [modalDaftarTPS, tabDaftarTPS, filterRT_BelumDitentukan, filterRW_BelumDitentukan]);
 
   // ==========================================
   // FUNGSI DASHBOARD
@@ -3709,6 +3729,153 @@ async function fetchStatusLoginAkun() {
     );
   }
 
+  async function fetchPemilihPerTPS(nomorTPS: string) {
+  setLoadingPemilihPerTPS(true);
+
+  const { data, error } = await supabase
+    .from('penduduk')
+    .select('*')
+    .eq('status_coklit', 'Ditemui')
+    .eq('divalidasi_admin', true)
+    .not(
+      'status_coklit',
+      'in',
+      '("Meninggal","Pindah","Tidak Dikenal","Perlu Koreksi","Belum Coklit")'
+    )
+    .eq('TPS', nomorTPS)
+    .order('NAMA', { ascending: true });
+
+  if (error) {
+    console.error('Error Supabase (Pemilih per TPS):', error);
+    alert('Error saat mengambil daftar pemilih TPS ini: ' + error.message);
+  } else {
+    setDataPemilihPerTPS(data || []);
+  }
+  setLoadingPemilihPerTPS(false);
+}
+
+async function fetchBelumDitentukan() {
+  setLoadingBelumDitentukan(true);
+
+  let query = supabase
+    .from('penduduk')
+    .select('*')
+    .eq('status_coklit', 'Ditemui')
+    .eq('divalidasi_admin', true)
+    .not(
+      'status_coklit',
+      'in',
+      '("Meninggal","Pindah","Tidak Dikenal","Perlu Koreksi","Belum Coklit")'
+    )
+    .or('TPS.is.null,TPS.eq.');
+
+  if (filterRT_BelumDitentukan !== 'Semua') query = query.eq('RT', filterRT_BelumDitentukan);
+  if (filterRW_BelumDitentukan !== 'Semua') query = query.eq('RW', filterRW_BelumDitentukan);
+
+  const { data, error } = await query.order('NAMA', { ascending: true });
+
+  if (error) {
+    console.error('Error Supabase (Belum Ditentukan):', error);
+    alert('Error saat mengambil data belum ditentukan: ' + error.message);
+  } else {
+    setDataBelumDitentukan(data || []);
+  }
+  setLoadingBelumDitentukan(false);
+}
+
+function bukaDaftarTPS(item: any) {
+  setModalDaftarTPS(item);
+  setTabDaftarTPS('SudahDiTPS');
+  setSelectedBelumDitentukan([]);
+  setSearchSudahDiTPS('');
+  setSearchBelumDitentukan('');
+  fetchPemilihPerTPS(item.nomor_tps);
+}
+
+function toggleSelectBelumDitentukan(id: string) {
+  setSelectedBelumDitentukan((prev) =>
+    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+  );
+}
+
+function toggleSelectAllBelumDitentukan() {
+  if (selectedBelumDitentukan.length === dataBelumDitentukan.length) {
+    setSelectedBelumDitentukan([]);
+  } else {
+    setSelectedBelumDitentukan(dataBelumDitentukan.map((item) => item.id));
+  }
+}
+
+async function assignMassalKeTPS() {
+  if (!modalDaftarTPS || selectedBelumDitentukan.length === 0) {
+    alert('Pilih minimal 1 orang untuk di-assign.');
+    return;
+  }
+
+  if (
+    !confirm(
+      `Assign ${selectedBelumDitentukan.length} pemilih ke TPS ${modalDaftarTPS.nomor_tps}?`
+    )
+  )
+    return;
+
+  setLoadingAssignMassal(true);
+
+  const { data, error } = await supabase
+    .from('penduduk')
+    .update({ TPS: modalDaftarTPS.nomor_tps })
+    .in('id', selectedBelumDitentukan)
+    .select();
+
+  console.log('Baris yang keupdate:', data);
+
+  setLoadingAssignMassal(false);
+
+  if (error) {
+    alert('Gagal assign ke TPS: ' + error.message);
+  } else {
+    setSelectedBelumDitentukan([]);
+    fetchBelumDitentukan();
+    fetchPemilihPerTPS(modalDaftarTPS.nomor_tps);
+  }
+}
+
+async function lepasDariTPS(item: any) {
+  if (!confirm(`Lepas ${item.NAMA} dari TPS ${modalDaftarTPS.nomor_tps}? TPS-nya akan dikosongkan lagi.`))
+    return;
+
+  const { error } = await supabase
+    .from('penduduk')
+    .update({ TPS: null })
+    .eq('id', item.id);
+
+  if (error) {
+    alert('Gagal melepas dari TPS: ' + error.message);
+  } else {
+    fetchPemilihPerTPS(modalDaftarTPS.nomor_tps);
+  }
+}
+
+const dataPemilihPerTPSFiltered = useMemo(() => {
+  const q = searchSudahDiTPS.trim().toLowerCase();
+  if (!q) return dataPemilihPerTPS;
+  return dataPemilihPerTPS.filter(
+    (item) =>
+      item.NAMA?.toLowerCase().includes(q) ||
+      item.NIK?.toLowerCase().includes(q)
+  );
+}, [dataPemilihPerTPS, searchSudahDiTPS]);
+
+const dataBelumDitentukanFiltered = useMemo(() => {
+  const q = searchBelumDitentukan.trim().toLowerCase();
+  if (!q) return dataBelumDitentukan;
+  return dataBelumDitentukan.filter(
+    (item) =>
+      item.NAMA?.toLowerCase().includes(q) ||
+      item.NIK?.toLowerCase().includes(q)
+  );
+}, [dataBelumDitentukan, searchBelumDitentukan]);
+
   // ==========================================
   // FUNGSI SAKSI
   // ==========================================
@@ -5267,6 +5434,15 @@ async function fetchStatusLoginAkun() {
                             </button>
                           </>
                         )}
+                          <button
+                          onClick={() => bukaDaftarTPS(item)}
+                          className="w-full mt-2 py-2 bg-emerald-50 hover:bg-emerald-500 hover:text-white text-emerald-700 font-bold text-xs rounded-lg transition-colors border border-emerald-100 flex items-center justify-center gap-1.5"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 100-8 4 4 0 000 8zm6 3c0-1.657-3.582-3-8-3s-8 1.343-8 3v2h16v-2z"></path>
+                          </svg>
+                          Kelola Daftar Pemilih ({jumlahDPTPerTPS[item.nomor_tps] || 0})
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -9933,7 +10109,6 @@ async function fetchStatusLoginAkun() {
                 TPS <span className="text-slate-300 normal-case"></span>
               </label>
               <select
-                required
                 value={modalPerbaikiBermasalah.TPS || ''}
                 onChange={(e) => setModalPerbaikiBermasalah({ ...modalPerbaikiBermasalah, TPS: e.target.value })}
                 className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
@@ -10441,7 +10616,7 @@ async function fetchStatusLoginAkun() {
                     </label>
                     <select
                       value={modalTPS.tps}
-                      onChange={(e) => setModalTPS({ ...modalTPS, tps: e.target.value })}
+                      onChange={(e) => setModalTPS({ ...modalTPS, nomor_tps: e.target.value })}
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="">-- Pilih TPS --</option>
@@ -10824,6 +10999,150 @@ async function fetchStatusLoginAkun() {
           </div>
         </div>
       )}
+
+        {modalDaftarTPS && (
+  <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-emerald-600 p-5 flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-black text-white">
+            Kelola Daftar Pemilih — TPS {modalDaftarTPS.nomor_tps}
+          </h2>
+          <p className="text-xs font-bold text-emerald-100 mt-0.5">
+            {modalDaftarTPS.nama_lokasi || '-'}
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setModalDaftarTPS(null);
+            setSelectedBelumDitentukan([]);
+          }}
+          className="text-white/80 hover:text-white bg-emerald-700 rounded-full p-1"
+        >
+          &times;
+        </button>
+      </div>
+
+      {/* TAB SWITCHER */}
+      <div className="flex gap-2 px-5 pt-4 border-b border-slate-200">
+        <button
+          onClick={() => setTabDaftarTPS('SudahDiTPS')}
+          className={`px-4 py-2.5 font-black text-sm border-b-2 transition-all flex items-center gap-2 ${
+            tabDaftarTPS === 'SudahDiTPS'
+              ? 'border-emerald-500 text-emerald-600'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          Sudah di TPS ini
+          {dataPemilihPerTPS.length > 0 && (
+            <span className="bg-emerald-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+              {dataPemilihPerTPS.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setTabDaftarTPS('BelumDitentukan')}
+          className={`px-4 py-2.5 font-black text-sm border-b-2 transition-all flex items-center gap-2 ${
+            tabDaftarTPS === 'BelumDitentukan'
+              ? 'border-orange-500 text-orange-600'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          Assign dari Belum Ditentukan
+        </button>
+      </div>
+
+      <div className="p-6 overflow-y-auto flex-1">
+        {tabDaftarTPS === 'SudahDiTPS' && (
+  <>
+    <input
+      type="text"
+      placeholder="Cari Nama atau NIK..."
+      value={searchSudahDiTPS}
+      onChange={(e) => setSearchSudahDiTPS(e.target.value)}
+      className="w-full mb-4 p-3 border-2 border-slate-200 rounded-xl font-bold text-sm focus:border-emerald-500 outline-none shadow-sm"
+    />
+    {loadingPemilihPerTPS ? (
+      <div className="flex justify-center py-16">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-4 border-emerald-600"></div>
+      </div>
+    ) : dataPemilihPerTPSFiltered.length === 0 ? (
+      <div className="bg-slate-50 p-8 rounded-xl text-center font-bold text-slate-400">
+        {dataPemilihPerTPS.length === 0
+          ? 'Belum ada pemilih yang di-assign ke TPS ini.'
+          : 'Tidak ada yang cocok dengan pencarian.'}
+      </div>
+    ) : (
+      <div className="overflow-x-auto bg-white rounded-xl border border-slate-200">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="text-left p-3 font-black text-slate-600 uppercase text-xs">Nama</th>
+              <th className="text-left p-3 font-black text-slate-600 uppercase text-xs">NIK</th>
+              <th className="text-left p-3 font-black text-slate-600 uppercase text-xs">RT/RW</th>
+              <th className="text-left p-3 font-black text-slate-600 uppercase text-xs">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {dataPemilihPerTPSFiltered.map((item) => (
+              <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="p-3 font-bold uppercase">{item.NAMA}</td>
+                <td className="p-3 font-mono">{item.NIK}</td>
+                <td className="p-3">{item.RT || '001'}/{item.RW || '001'}</td>
+                <td className="p-3">
+                  <button
+                    onClick={() => lepasDariTPS(item)}
+                    className="px-2.5 py-1.5 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-[10px] rounded-lg transition-colors border border-red-100"
+                  >
+                    Lepas dari TPS
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </>
+)}
+
+        {tabDaftarTPS === 'BelumDitentukan' && (
+          <>
+            <div className="flex flex-wrap gap-3 mb-4">
+              <input
+                type="text"
+                placeholder="Cari Nama atau NIK..."
+                value={searchBelumDitentukan}
+                onChange={(e) => setSearchBelumDitentukan(e.target.value)}
+                className="flex-1 min-w-[200px] p-2.5 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500"
+              />
+              <select
+                value={filterRT_BelumDitentukan}
+                onChange={(e) => setFilterRT_BelumDitentukan(e.target.value)}
+                className="p-2.5 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+              >
+                <option value="Semua">Semua RT</option>
+                {DAFTAR_RT.map((rt) => (
+                  <option key={rt} value={rt}>RT {rt}</option>
+                ))}
+              </select>
+              <select
+                value={filterRW_BelumDitentukan}
+                onChange={(e) => setFilterRW_BelumDitentukan(e.target.value)}
+                className="p-2.5 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-orange-500 cursor-pointer"
+              >
+                <option value="Semua">Semua RW</option>
+                {DAFTAR_RW.map((rw) => (
+                  <option key={rw} value={rw}>RW {rw}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  </div>
+)}
 
       {modalInputSuara && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
