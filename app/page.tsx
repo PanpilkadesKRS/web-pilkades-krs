@@ -1834,6 +1834,7 @@ export default function Home() {
       'NIK',
       'NKK',
       'Tanggal Lahir',
+      'Jenis Kelamin',
       'Umur Hari H',
       'Tempat Lahir',
       'Alamat',
@@ -1852,7 +1853,8 @@ export default function Home() {
       item.TANGGAL_LAHIR
         ? new Date(item.TANGGAL_LAHIR).toLocaleDateString('id-ID')
         : '-',
-      hitungUmurHariH(item.TANGGAL_LAHIR) !== null
+      item.KELAMIN || '-',
+        hitungUmurHariH(item.TANGGAL_LAHIR) !== null
         ? `${hitungUmurHariH(item.TANGGAL_LAHIR)} tahun`
         : '-',
       item.TEMPAT_LAHIR || '-',
