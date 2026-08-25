@@ -68,6 +68,7 @@ export async function POST(request: Request) {
     const hasilAman = hasil.map((w) => ({
       nama: w.NAMA,
       nik_tersamar: w.NIK ? w.NIK.slice(0, 4) + '••••••••' + w.NIK.slice(-4) : null,
+      kk_tersamar: w.NKK ? w.NKK.slice(0, 4) + '••••••••' + w.NKK.slice(-4) : null,
       dusun: w.DUSUN,
       rt: w.RT,
       rw: w.RW,
@@ -76,6 +77,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ status: 'ditemukan', hasil: hasilAman });
   } catch (err: any) {
     console.error('Error cek-dps:', err);
+    return NextResponse.json(
+      { error: 'Terjadi kesalahan server. Coba lagi nanti.' },
+      { status: 500 }
+    );
+  }
+}
+export async function GET() {
+  try {
+    const { data: hasil, error } = await supabaseAdmin
+      .from('penduduk')
+      .select('NAMA, NIK, NKK, DUSUN, RT, RW, TPS')
+      .order('NAMA', { ascending: true });
+
+    if (error) {
+      console.error('Error query semua penduduk:', error);
+      return NextResponse.json(
+        { error: 'Terjadi kesalahan saat memuat data.' },
+        { status: 500 }
+      );
+    }
+
+    const hasilAman = (hasil || []).map((w) => ({
+      nama: w.NAMA,
+      nik_tersamar: w.NIK ? w.NIK.slice(0, 4) + '••••••••' + w.NIK.slice(-4) : null,
+      kk_tersamar: w.NKK ? w.NKK.slice(0, 4) + '••••••••' + w.NKK.slice(-4) : null,
+      dusun: w.DUSUN,
+      rt: w.RT,
+      rw: w.RW,
+      tps: w.TPS,
+    }));
+
+    return NextResponse.json(hasilAman);
+  } catch (err: any) {
+    console.error('Error dps GET:', err);
     return NextResponse.json(
       { error: 'Terjadi kesalahan server. Coba lagi nanti.' },
       { status: 500 }

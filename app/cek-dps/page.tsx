@@ -17,14 +17,12 @@ type Petugas = {
 type WargaHasil = {
   nama: string;
   nik_tersamar: string | null;
+  kk_tersamar: string | null;
   dusun: string;
   rt: string;
   rw: string;
+  tps: string | null; 
 };
-
-type HasilCek =
-  | { status: 'ditemukan'; hasil: WargaHasil[] }
-  | { status: 'kosong'; hasil: WargaHasil[] };
 
 /* ------------------------------------------------------------------ */
 /*  Motif: lambang cincin merah-kuning-hijau (nuansa lambang daerah)  */
@@ -184,39 +182,32 @@ function LembarKontakPetugas({
 
 export default function CekDPS() {
   const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [hasil, setHasil] = useState<HasilCek | null>(null);
+  const [loading, setLoading] = useState(true); // loading data awal, bukan loading submit
+  const [semuaWarga, setSemuaWarga] = useState<WargaHasil[]>([]);
   const [error, setError] = useState('');
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);  
 
   const { hari, jam, menit, detik, selesai } = useCountdown(TARGET);
 
-  async function handleCek(e: React.FormEvent) {
-    e.preventDefault();
-    if (!query.trim()) return;
+ useEffect(() => {
     setLoading(true);
     setError('');
-    setHasil(null);
+    fetch('/api/cek-dps') // GET, bukan POST — endpoint baru yang ngembaliin SEMUA data
+      .then((r) => r.json())
+      .then((data: WargaHasil[]) => setSemuaWarga(Array.isArray(data) ? data : []))
+      .catch(() => setError('Gagal memuat data DPS. Cek koneksi internet Anda.'))
+      .finally(() => setLoading(false));
+  }, []);
 
-    try {
-      const res = await fetch('/api/cek-dps', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: query.trim() }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || 'Terjadi kesalahan.');
-      } else {
-        setHasil(data);
-      }
-    } catch {
-      setError('Gagal menghubungi server. Cek koneksi internet Anda.');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const hasilFilter = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return semuaWarga;
+    return semuaWarga.filter(
+      (w) =>
+        w.nama.toLowerCase().includes(q) ||
+        (w.nik_tersamar ?? '').toLowerCase().includes(q)
+    );
+  }, [semuaWarga, query]);
 
   return (
     <main className="min-h-screen bg-[#FFFDF9]">
@@ -284,59 +275,78 @@ export default function CekDPS() {
               Masukkan nama lengkap atau NIK sesuai KTP
             </p>
 
-            <form onSubmit={handleCek} className="mt-5 space-y-3">
+            <div className="mt-5">
               <input
                 type="text"
-                required
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Nama lengkap atau NIK"
+                placeholder="Cari nama lengkap atau NIK..."
                 className="w-full px-4 py-3.5 bg-[#FFFDF9] border-2 border-[#EDE6D3] rounded-xl font-semibold text-[#201D18] focus:border-[#1B6B3A] outline-none"
               />
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-3.5 bg-[#1B6B3A] hover:bg-[#155A30] text-white font-bold rounded-xl shadow-md flex justify-center items-center transition-colors"
-              >
-                {loading ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  'Cek Status'
-                )}
-              </button>
-            </form>
+            </div>
 
-            {error && (
-              <div className="mt-5 p-4 bg-red-50 border border-red-200 text-[#C81E1E] text-sm font-bold rounded-xl text-center">
-                {error}
-              </div>
-            )}
+           {error && (
+            <div className="mt-5 p-4 bg-red-50 border border-red-200 text-[#C81E1E] text-sm font-bold rounded-xl text-center">
+              {error}
+            </div>
+          )}
 
-            {hasil?.status === 'ditemukan' && (
-              <div className="mt-5 space-y-2">
-                <p className="text-xs font-bold text-[#8A6B10]">
-                  Ditemukan {hasil.hasil.length} data, pilih nama yang sesuai:
+          {loading && (
+            <div className="mt-6 flex justify-center">
+              <div className="w-6 h-6 border-2 border-[#1B6B3A] border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
+
+          {!loading && !error && (
+              <div className="mt-5">
+                <p className="text-xs font-bold text-[#8A6B10] mb-2">
+                  {query.trim()
+                    ? `Ditemukan ${hasilFilter.length} data cocok:`
+                    : `Menampilkan seluruh ${hasilFilter.length} data DPS:`}
                 </p>
-                {hasil.hasil.map((w, idx) => (
-                  <div
-                    key={idx}
-                    className="p-4 bg-[#EAF5EC] border-2 border-[#C7E3CD] rounded-xl"
-                  >
-                    <p className="font-black text-[#1B6B3A]">{w.nama}</p>
-                    <p className="text-xs font-bold text-[#276B44] mt-1">
-                      NIK {w.nik_tersamar} · Dusun {w.dusun} · RT {w.rt}/RW {w.rw}
+
+                {hasilFilter.length === 0 ? (
+                  <div className="p-5 bg-[#FCF3D9] border-2 border-[#EFD98F] rounded-xl text-center">
+                    <p className="font-black text-[#9A6B04]">Nama tidak ditemukan</p>
+                    <p className="text-xs font-bold text-[#B0792C] mt-2">
+                      Ketuk tombol WhatsApp di kanan bawah untuk melapor ke petugas RT/RW Anda.
                     </p>
                   </div>
-                ))}
-              </div>
-            )}
-
-            {hasil?.status === 'kosong' && (
-              <div className="mt-5 p-5 bg-[#FCF3D9] border-2 border-[#EFD98F] rounded-xl text-center">
-                <p className="font-black text-[#9A6B04]">Nama Anda BELUM/TIDAK ditemukan</p>
-                <p className="text-xs font-bold text-[#B0792C] mt-2">
-                  Ketuk tombol WhatsApp di kanan bawah untuk melapor ke petugas RT/RW Anda.
-                </p>
+                ) : (
+                  <div className="border-2 border-[#EDE6D3] rounded-xl overflow-hidden">
+                    <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-[#F2ECDA] z-10">
+                          <tr>
+                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">Nama</th>
+                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">NIK</th>
+                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">KK</th>
+                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">Dusun</th>
+                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">RT</th>
+                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">RW</th>
+                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">TPS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {hasilFilter.map((w, idx) => (
+                            <tr
+                              key={idx}
+                              className={idx % 2 === 0 ? 'bg-white' : 'bg-[#FFFDF9]'}
+                            >
+                              <td className="px-3 py-2 font-bold text-[#1B6B3A] whitespace-nowrap">{w.nama}</td>
+                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.nik_tersamar ?? '-'}</td>
+                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.kk_tersamar ?? '-'}</td>
+                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.dusun ?? '-'}</td>
+                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.rt ?? '-'}</td>
+                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.rw ?? '-'}</td>
+                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.tps ?? '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
