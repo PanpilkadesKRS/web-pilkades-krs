@@ -1,6 +1,16 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '../../../lib/supabaseAdmin';
 
+type PendudukRow = {
+  NAMA: string;
+  NIK: string | null;
+  NKK: string | null;
+  DUSUN: string | null;
+  RT: string | null;
+  RW: string | null;
+  TPS?: string | null;
+};
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -65,7 +75,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'kosong', hasil: [] });
     }
 
-    const hasilAman = hasil.map((w) => ({
+    const hasilAman = hasil.map((w: PendudukRow) => ({
       nama: w.NAMA,
       nik_tersamar: w.NIK ? w.NIK.slice(0, 4) + '••••••••' + w.NIK.slice(-4) : null,
       kk_tersamar: w.NKK ? w.NKK.slice(0, 4) + '••••••••' + w.NKK.slice(-4) : null,
@@ -83,29 +93,45 @@ export async function POST(request: Request) {
     );
   }
 }
+
 export async function GET() {
   try {
-    const { data: hasil, error } = await supabaseAdmin
-      .from('penduduk')
-      .select('NAMA, NIK, NKK, DUSUN, RT, RW, TPS')
-      .order('NAMA', { ascending: true });
+    const pageSize = 1000;
+    let from = 0;
+    let semuaData: PendudukRow[] = [];
 
-    if (error) {
-      console.error('Error query semua penduduk:', error);
-      return NextResponse.json(
-        { error: 'Terjadi kesalahan saat memuat data.' },
-        { status: 500 }
-      );
+    while (true) {
+      const { data, error } = await supabaseAdmin
+        .from('penduduk')
+        .select('NAMA, NIK, NKK, DUSUN, RT, RW, TPS')
+        .eq('status_coklit', 'Ditemui')
+        .order('NAMA', { ascending: true })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        console.error('Error query semua penduduk:', error);
+        return NextResponse.json(
+          { error: 'Terjadi kesalahan saat memuat data.' },
+          { status: 500 }
+        );
+      }
+
+      if (!data || data.length === 0) break;
+
+      semuaData = semuaData.concat(data);
+
+      if (data.length < pageSize) break; // udah halaman terakhir
+      from += pageSize;
     }
 
-    const hasilAman = (hasil || []).map((w) => ({
+    const hasilAman = semuaData.map((w) => ({
       nama: w.NAMA,
       nik_tersamar: w.NIK ? w.NIK.slice(0, 4) + '••••••••' + w.NIK.slice(-4) : null,
       kk_tersamar: w.NKK ? w.NKK.slice(0, 4) + '••••••••' + w.NKK.slice(-4) : null,
       dusun: w.DUSUN,
       rt: w.RT,
       rw: w.RW,
-      tps: w.TPS,
+      tps: w.TPS ?? null,
     }));
 
     return NextResponse.json(hasilAman);
