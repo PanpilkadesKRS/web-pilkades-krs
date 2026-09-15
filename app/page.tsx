@@ -3613,15 +3613,16 @@ async function fetchStatusLoginAkun() {
 
     setDataTPSMaster(data || []);
 
-    // Ambil semua pemilih "Ditemui" (paginasi, Supabase max 1000/request)
+    // Ambil data pemilih "Ditemui" yang valid untuk dihitung
     let semuaPenduduk: any[] = [];
     let dariBaris = 0;
     const ukuranHalaman = 1000;
 
     while (true) {
+      // Sekarang kita cuma butuh kolom TPS aja untuk dihitung
       const { data: halaman, error: errPenduduk } = await supabase
         .from('penduduk')
-        .select('RT, RW, TPS, status_coklit, divalidasi_admin')
+        .select('TPS, status_coklit, divalidasi_admin')
         .eq('status_coklit', 'Ditemui')
         .eq('divalidasi_admin', true)
         .range(dariBaris, dariBaris + ukuranHalaman - 1);
@@ -3640,20 +3641,10 @@ async function fetchStatusLoginAkun() {
     const hitung: Record<string, number> = {};
 
     (data || []).forEach((tps: any) => {
-      const rtCakupan = tps.rt_cakupan || [];
-      const rwCakupan = tps.rw_cakupan || [];
-
-      const jumlah = semuaPenduduk.filter((p: any) => {
-        const rt = String(p.RT ?? '').padStart(3, '0');
-        const rw = String(p.RW ?? '').padStart(3, '0');
-        const tpsManual = String(p.TPS || '').trim();
-
-        // Kalau sudah pernah di-assign manual, pakai itu (override)
-        if (tpsManual) return tpsManual === String(tps.nomor_tps).trim();
-
-        // Kalau belum, tentukan otomatis dari cakupan RT/RW TPS
-        return rtCakupan.includes(rt) && rwCakupan.includes(rw);
-      }).length;
+      // PENGHITUNGAN BARU: Murni cocokkan kolom TPS di tabel penduduk dengan nomor_tps
+      const jumlah = semuaPenduduk.filter((p: any) => 
+        String(p.TPS || '').trim() === String(tps.nomor_tps).trim()
+      ).length;
 
       hitung[tps.nomor_tps] = jumlah;
     });
@@ -3909,7 +3900,7 @@ async function exportTemplateAssignTPS() {
   setLoadingImportAssignTPS(false);
 }
 
-  async function simpanTPS(e: React.FormEvent) {
+ async function simpanTPS(e: React.FormEvent) {
     e.preventDefault();
     if (!modalTPS) return;
 
@@ -3920,8 +3911,6 @@ async function exportTemplateAssignTPS() {
       nama_lokasi: modalTPS.nama_lokasi || null,
       alamat: modalTPS.alamat || null,
       dusun: modalTPS.dusun || null,
-      rt_cakupan: modalTPS.rt_cakupan?.length > 0 ? modalTPS.rt_cakupan : null,
-      rw_cakupan: modalTPS.rw_cakupan?.length > 0 ? modalTPS.rw_cakupan : null,
       latitude: modalTPS.latitude ? Number(modalTPS.latitude) : null,
       longitude: modalTPS.longitude ? Number(modalTPS.longitude) : null,
       keterangan: modalTPS.keterangan || null,
@@ -4051,41 +4040,19 @@ async function exportTemplateAssignTPS() {
 async function fetchPemilihPerTPS(tps: any) {
   setLoadingPemilihPerTPS(true);
 
-  const rtCakupan = tps.rt_cakupan || [];
-  const rwCakupan = tps.rw_cakupan || [];
-
-  let semuaData: any[] = [];
-  let dariBaris = 0;
-  const ukuranHalaman = 1000;
-
   try {
-    while (true) {
-      const { data, error } = await supabase
-        .from('penduduk')
-        .select('*')
-        .eq('status_coklit', 'Ditemui')
-        .eq('divalidasi_admin', true)
-        .order('NAMA', { ascending: true })
-        .range(dariBaris, dariBaris + ukuranHalaman - 1);
+    // LANGSUNG FILTER DARI SUPABASE (Sangat cepat & ringan)
+    const { data, error } = await supabase
+      .from('penduduk')
+      .select('*')
+      .eq('status_coklit', 'Ditemui')
+      .eq('divalidasi_admin', true)
+      .eq('TPS', String(tps.nomor_tps).trim()) // Cocokkan langsung dari kolom TPS
+      .order('NAMA', { ascending: true });
 
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-
-      semuaData = semuaData.concat(data);
-      if (data.length < ukuranHalaman) break;
-      dariBaris += ukuranHalaman;
-    }
-
-    const hasil = semuaData.filter((p: any) => {
-      const rt = String(p.RT ?? '').padStart(3, '0');
-      const rw = String(p.RW ?? '').padStart(3, '0');
-      const tpsManual = String(p.TPS || '').trim();
-
-      if (tpsManual) return tpsManual === String(tps.nomor_tps).trim();
-      return rtCakupan.includes(rt) && rwCakupan.includes(rw);
-    });
-
-    setDataPemilihPerTPS(hasil);
+    if (error) throw error;
+    
+    setDataPemilihPerTPS(data || []);
   } catch (error: any) {
     console.error('Error Supabase (Pemilih per TPS):', error);
     alert('Error saat mengambil daftar pemilih TPS ini: ' + error.message);
@@ -4093,6 +4060,71 @@ async function fetchPemilihPerTPS(tps: any) {
 
   setLoadingPemilihPerTPS(false);
 }
+
+async function exportExcelPerTPS(tps: any) {
+    try {
+      let semuaData: any[] = [];
+      let dariBaris = 0;
+      const ukuranHalaman = 1000;
+      const tpsLabel = tps.nomor_tps;
+
+      // Kasih notifikasi sederhana ke user supaya nggak bingung kalau agak lama
+      alert(`Mulai mengunduh data TPS ${tpsLabel}, proses ini mungkin memakan waktu beberapa detik...`);
+
+      // Tarik datanya langsung dari Supabase khusus TPS ini
+      while (true) {
+        const { data, error } = await supabase
+          .from('penduduk')
+          .select('NAMA, NIK, NKK, TEMPAT_LAHIR, TANGGAL_LAHIR, KELAMIN, ALAMAT, DUSUN, RT, RW, TPS, ragam_disabilitas')
+          .eq('status_coklit', 'Ditemui')
+          .eq('divalidasi_admin', true)
+          .eq('TPS', String(tpsLabel).trim())
+          .order('NAMA', { ascending: true })
+          .range(dariBaris, dariBaris + ukuranHalaman - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        semuaData = semuaData.concat(data);
+        if (data.length < ukuranHalaman) break;
+        dariBaris += ukuranHalaman;
+      }
+
+      if (semuaData.length === 0) {
+        alert(`Belum ada data pemilih yang di-assign ke TPS ${tpsLabel}.`);
+        return;
+      }
+
+      // Rapikan data ke format tabel Excel
+      const rows = semuaData.map((item, idx) => ({
+        'No': idx + 1,
+        'Nama Pemilih': item.NAMA,
+        'NIK': item.NIK ? `'${item.NIK}` : '', // Pakai tanda petik agar Excel tidak membulatkan NIK
+        'NKK': item.NKK ? `'${item.NKK}` : '',
+        'Tempat Lahir': item.TEMPAT_LAHIR || '-',
+        'Tanggal Lahir': item.TANGGAL_LAHIR ? new Date(item.TANGGAL_LAHIR).toLocaleDateString('id-ID') : '-',
+        'Umur (Hari H)': hitungUmurHariH(item.TANGGAL_LAHIR) || '-',
+        'L/P': item.KELAMIN || '-',
+        'Alamat': item.ALAMAT || '-',
+        'Dusun': item.DUSUN || '-',
+        'RT': item.RT || '-',
+        'RW': item.RW || '-',
+        'TPS': item.TPS || '-',
+        'Disabilitas': item.ragam_disabilitas || '-'
+      }));
+
+      // Bikin file Excel (.xlsx) pakai library yang sudah ada
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, `TPS ${tpsLabel}`);
+      
+      const namaFile = `Daftar_Pemilih_TPS_${tpsLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(workbook, namaFile);
+
+    } catch (err: any) {
+      alert('Gagal mengekspor Excel: ' + err.message);
+    }
+  }
 
 async function fetchBelumDitentukan() {
   setLoadingBelumDitentukan(true);
@@ -5686,153 +5718,165 @@ const dataBelumDitentukanFiltered = useMemo(() => {
             </div>
           )}
 
-            {activeMenu === 'TPS' && (
-  <div className="max-w-6xl mx-auto pb-10">
-    
-    {/* HEADER TUNGGAL YANG LEBIH RAPI */}
-    <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-6 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-      <div>
-        <h2 className="text-2xl font-black text-slate-900">
-          Tempat Pemungutan Suara
-        </h2>
-        <p className="text-sm text-slate-500 font-bold mt-1">
-          Kelola lokasi TPS dan assign pemilih massal via Import Excel.
-        </p>
-      </div>
-      {(user.role === 'Super Admin' || user.role === 'Admin') && (
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={exportTemplateAssignTPS}
-            disabled={loadingExportTemplateTPS}
-            className="px-4 py-2.5 bg-slate-50 border-2 border-slate-200 text-slate-700 font-bold text-sm rounded-xl hover:bg-slate-100 hover:border-slate-300 transition-all disabled:opacity-50"
-          >
-            {loadingExportTemplateTPS ? 'Menyiapkan...' : '↓ Download Template'}
-          </button>
-          
-          <label className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow-sm cursor-pointer transition-all">
-            {loadingImportAssignTPS ? 'Memproses...' : '↑ Import Data TPS'}
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              className="hidden"
-              disabled={loadingImportAssignTPS}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) prosesImportAssignTPS(file);
-                // Reset input biar bisa upload file yang sama jika salah
-                e.target.value = ''; 
-              }}
-            />
-          </label>
+            {/* ========================================== */}
+          {/* KONTEN MENU: TPS */}
+          {/* ========================================== */}
+          {activeMenu === 'TPS' && (
+            <div className="max-w-6xl mx-auto pb-10">
+              {/* HEADER TUNGGAL YANG LEBIH RAPI */}
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-6 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900">
+                    Tempat Pemungutan Suara
+                  </h2>
+                  <p className="text-sm text-slate-500 font-bold mt-1">
+                    Kelola lokasi TPS, export data DPT per TPS, dan assign pemilih massal via Import Excel.
+                  </p>
+                </div>
+                {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                    <button
+                      onClick={exportTemplateAssignTPS}
+                      disabled={loadingExportTemplateTPS}
+                      className="flex-1 md:flex-none px-4 py-2.5 bg-slate-50 border-2 border-slate-200 text-slate-700 font-bold text-sm rounded-xl hover:bg-slate-100 hover:border-slate-300 transition-all disabled:opacity-50 text-center"
+                    >
+                      {loadingExportTemplateTPS ? 'Menyiapkan...' : '↓ Download Template'}
+                    </button>
+                    
+                    <label className="flex-1 md:flex-none px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow-sm cursor-pointer transition-all text-center">
+                      {loadingImportAssignTPS ? 'Memproses...' : '↑ Import Data TPS'}
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        className="hidden"
+                        disabled={loadingImportAssignTPS}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) prosesImportAssignTPS(file);
+                          e.target.value = ''; // Reset input
+                        }}
+                      />
+                    </label>
 
-          <button
-            onClick={bukaTambahTPS}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all"
-          >
-            + Tambah TPS
-          </button>
-        </div>
-      )}
-    </div>
+                    <button
+                      onClick={bukaTambahTPS}
+                      className="flex-1 md:flex-none px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all"
+                    >
+                      + Tambah TPS
+                    </button>
+                  </div>
+                )}
+              </div>
 
-    {/* HASIL IMPORT ASSIGN MASSAL */}
-    {hasilImportAssignTPS && (
-      <div className="mb-6 animate-in fade-in slide-in-from-top-2">
-        <span>
-          ✓ {hasilImportAssignTPS.berhasil} dari {hasilImportAssignTPS.totalDiproses} data berhasil diproses.
-          {hasilImportAssignTPS.detail && ` (${hasilImportAssignTPS.detail})`}
-        </span>
-        {hasilImportAssignTPS.gagal.length > 0 && (
-          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm font-bold shadow-sm mt-3">
-            <p className="mb-2 flex items-center gap-2">
-              <span className="bg-red-500 text-white px-2 py-0.5 rounded text-[10px]">INFO</span> 
-              Ada {hasilImportAssignTPS.gagal.length} baris gagal diproses:
-            </p>
-            <div className="max-h-40 overflow-y-auto text-xs bg-white border border-red-100 rounded-lg p-3 font-mono leading-relaxed">
-              {hasilImportAssignTPS.gagal.map((g: string, i: number) => (
-                <div key={i} className="border-b border-red-50 py-1 last:border-0">{g}</div>
-              ))}
-            </div>
-          </div>
-        )}
-        <button
-          onClick={() => setHasilImportAssignTPS(null)}
-          className="mt-3 text-xs font-black uppercase text-slate-400 hover:text-slate-600 tracking-wider"
-        >
-          Tutup Notifikasi
-        </button>
-      </div>
-    )}
+              {/* HASIL IMPORT ASSIGN MASSAL */}
+              {hasilImportAssignTPS && (
+                <div className="mb-6 animate-in fade-in slide-in-from-top-2">
+                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-4 rounded-xl text-sm font-bold shadow-sm flex justify-between items-center">
+                    <span>
+                      ✓ {hasilImportAssignTPS.berhasil} dari {hasilImportAssignTPS.totalDiproses} data berhasil diproses.
+                      {hasilImportAssignTPS.detail && ` (${hasilImportAssignTPS.detail})`}
+                    </span>
+                    <button onClick={() => setHasilImportAssignTPS(null)} className="text-emerald-500 hover:text-emerald-800 text-lg">&times;</button>
+                  </div>
+                  {hasilImportAssignTPS.gagal.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm font-bold shadow-sm mt-3">
+                      <p className="mb-2 flex items-center gap-2">
+                        <span className="bg-red-500 text-white px-2 py-0.5 rounded text-[10px]">INFO</span> 
+                        Ada {hasilImportAssignTPS.gagal.length} baris gagal diproses:
+                      </p>
+                      <div className="max-h-40 overflow-y-auto text-xs bg-white border border-red-100 rounded-lg p-3 font-mono leading-relaxed">
+                        {hasilImportAssignTPS.gagal.map((g: string, i: number) => (
+                          <div key={i} className="border-b border-red-50 py-1 last:border-0">{g}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
-    {/* KARTU LIST TPS */}
-    {loadingTPSMaster ? (
-      <div className="flex justify-center py-20">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
-      </div>
-    ) : dataTPSMaster.length === 0 ? (
-      <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400 shadow-sm">
-        Belum ada data TPS.
-      </div>
-    ) : (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        {dataTPSMaster.map((item) => (
-          <div key={item.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col">
-            <div className="flex justify-between items-start mb-3">
-              <span className="w-12 h-12 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-lg shrink-0">
-                {item.nomor_tps}
-              </span>
-              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full text-[10px] font-black uppercase">
-                {jumlahDPTPerTPS[item.nomor_tps] || 0} DPT
-              </span>
-            </div>
-            <h3 className="font-black text-slate-900 mb-1">
-              {item.nama_lokasi || `TPS ${item.nomor_tps}`}
-            </h3>
-            <p className="text-xs font-bold text-slate-500">
-              {item.alamat || 'Alamat belum diisi'}
-            </p>
-            <p className="text-xs font-bold text-slate-400 mt-1">
-              Dusun {item.dusun || '-'}
-              {item.rt_cakupan?.length > 0 && ` · RT ${item.rt_cakupan.join(', ')}`}
-              {item.rw_cakupan?.length > 0 && ` / RW ${item.rw_cakupan.join(', ')}`}
-            </p>
+              {/* KARTU LIST TPS */}
+              {loadingTPSMaster ? (
+                <div className="flex justify-center py-20">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
+                </div>
+              ) : dataTPSMaster.length === 0 ? (
+                <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400 shadow-sm">
+                  Belum ada data TPS.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {dataTPSMaster.map((item) => (
+                    <div key={item.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col">
+                      <div className="flex justify-between items-start mb-3">
+                        <span className="w-12 h-12 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-lg shrink-0 shadow-sm">
+                          {item.nomor_tps}
+                        </span>
+                        <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full text-[10px] font-black uppercase">
+                          {jumlahDPTPerTPS[item.nomor_tps] || 0} DPT
+                        </span>
+                      </div>
+                      <h3 className="font-black text-slate-900 mb-1">
+                        {item.nama_lokasi || `TPS ${item.nomor_tps}`}
+                      </h3>
+                      <p className="text-xs font-bold text-slate-500 line-clamp-2 min-h-[32px]">
+                        {item.alamat || 'Alamat belum diisi'}
+                      </p>
 
-            <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
-              <button
-                onClick={() => bukaGoogleMapsTPS(item)}
-                className="flex-1 py-2 bg-indigo-50 hover:bg-indigo-500 hover:text-white text-indigo-700 font-bold text-xs rounded-lg transition-colors border border-indigo-100 flex items-center justify-center gap-1.5"
-              >
-                Arahkan
-              </button>
-              {(user.role === 'Super Admin' || user.role === 'Admin') && (
-                <>
-                  <button
-                    onClick={() => bukaEditTPS(item)}
-                    className="px-4 py-2 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-lg transition-colors border border-slate-200"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => hapusTPS(item)}
-                    className="px-4 py-2 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-xs rounded-lg transition-colors border border-red-100"
-                  >
-                    Hapus
-                  </button>
-                </>
+                      <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
+                        <button
+                          onClick={() => bukaGoogleMapsTPS(item)}
+                          className="flex-1 py-2 bg-indigo-50 hover:bg-indigo-500 hover:text-white text-indigo-700 font-bold text-xs rounded-lg transition-colors border border-indigo-100 flex items-center justify-center gap-1.5"
+                        >
+                          Maps
+                        </button>
+                        {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                          <>
+                            <button
+                              onClick={() => bukaEditTPS(item)}
+                              className="flex-1 py-2 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-lg transition-colors border border-slate-200"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => hapusTPS(item)}
+                              className="flex-1 py-2 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-xs rounded-lg transition-colors border border-red-100"
+                            >
+                              Hapus
+                            </button>
+                          </>
+                        )}
+                      </div>
+
+                      {/* TOMBOL EXPORT DAN KELOLA PEMILIH (SEJAJAR) */}
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => exportExcelPerTPS(item)}
+                          className="flex-1 py-2.5 bg-emerald-50 hover:bg-emerald-500 hover:text-white text-emerald-700 font-bold text-xs rounded-lg transition-colors border border-emerald-100 flex items-center justify-center gap-1.5"
+                          title="Export Excel TPS ini"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                          </svg>
+                          Export
+                        </button>
+
+                        <button
+                          onClick={() => bukaDaftarTPS(item)}
+                          className="flex-[1.5] py-2.5 bg-indigo-50 hover:bg-indigo-500 hover:text-white text-indigo-700 font-bold text-xs rounded-lg transition-colors border border-indigo-100 flex items-center justify-center gap-1.5"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 100-8 4 4 0 000 8zm6 3c0-1.657-3.582-3-8-3s-8 1.343-8 3v2h16v-2z"></path>
+                          </svg>
+                          Kelola Pemilih
+                        </button>
+                      </div>
+                      
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-            <button
-              onClick={() => bukaDaftarTPS(item)}
-              className="w-full mt-2 py-2 bg-emerald-50 hover:bg-emerald-500 hover:text-white text-emerald-700 font-bold text-xs rounded-lg transition-colors border border-emerald-100 flex items-center justify-center gap-1.5"
-            >
-              Keluar Daftar Pemilih ({jumlahDPTPerTPS[item.nomor_tps] || 0})
-            </button>
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-)}
+          )}
 
           {activeMenu === 'Kandidat' && (
             <div className="max-w-6xl mx-auto pb-10">
