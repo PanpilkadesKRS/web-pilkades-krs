@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import * as XLSX from 'xlsx';
 
 // ==========================================
 // MASTER DAFTAR MENU APLIKASI
@@ -274,6 +275,12 @@ export default function Home() {
   const [modalTPS, setModalTPS] = useState<any | null>(null);
   const [loadingSimpanTPS, setLoadingSimpanTPS] = useState(false);
   const [jumlahDPTPerTPS, setJumlahDPTPerTPS] = useState<Record<string, number>>({});
+  const [modalImportTPS, setModalImportTPS] = useState<any | null>(null); // simpan objek TPS yang lagi diimport
+  const [loadingImportTPS, setLoadingImportTPS] = useState(false);
+  const [hasilImportTPS, setHasilImportTPS] = useState<any | null>(null); // { totalDiproses, berhasil, gagal: [] }
+  const [loadingExportTemplateTPS, setLoadingExportTemplateTPS] = useState(false);
+  const [loadingImportAssignTPS, setLoadingImportAssignTPS] = useState(false);
+  const [hasilImportAssignTPS, setHasilImportAssignTPS] = useState<any | null>(null);
 
   // --- STATE DAFTAR PEMILIH PER TPS ---
   const [modalDaftarTPS, setModalDaftarTPS] = useState<any | null>(null);
@@ -3584,8 +3591,10 @@ async function fetchStatusLoginAkun() {
     }
   }
 
-    // ==========================================
-  // FUNGSI TPS (MASTER DATA)
+   // ==========================================
+  // FUNGSI TPS (MASTER DATA) — FIXED
+  // Jumlah pemilih per TPS dihitung dari status_coklit = 'Ditemui'
+  // yang RT/RW-nya masuk cakupan TPS, BUKAN dari kolom TPS di penduduk
   // ==========================================
   async function fetchTPSMaster() {
     setLoadingTPSMaster(true);
@@ -3604,23 +3613,52 @@ async function fetchStatusLoginAkun() {
 
     setDataTPSMaster(data || []);
 
-    // Hitung jumlah DPT per nomor TPS, langsung dari tabel penduduk
-    // (kolom TPS di penduduk itu teks bebas, dicocokkan ke nomor_tps di sini)
-    const { data: dptData, error: dptError } = await supabase
-      .from('penduduk')
-      .select('TPS')
-      .eq('status_dpt', 'DPT');
+    // Ambil semua pemilih "Ditemui" (paginasi, Supabase max 1000/request)
+    let semuaPenduduk: any[] = [];
+    let dariBaris = 0;
+    const ukuranHalaman = 1000;
 
-    if (!dptError && dptData) {
-      const hitung: Record<string, number> = {};
-      dptData.forEach((item: any) => {
-        const key = String(item.TPS || '').trim();
-        if (!key) return;
-        hitung[key] = (hitung[key] || 0) + 1;
-      });
-      setJumlahDPTPerTPS(hitung);
+    while (true) {
+      const { data: halaman, error: errPenduduk } = await supabase
+        .from('penduduk')
+        .select('RT, RW, TPS, status_coklit, divalidasi_admin')
+        .eq('status_coklit', 'Ditemui')
+        .eq('divalidasi_admin', true)
+        .range(dariBaris, dariBaris + ukuranHalaman - 1);
+
+      if (errPenduduk) {
+        console.error('Error Supabase (Hitung Pemilih per TPS):', errPenduduk);
+        break;
+      }
+      if (!halaman || halaman.length === 0) break;
+
+      semuaPenduduk = semuaPenduduk.concat(halaman);
+      if (halaman.length < ukuranHalaman) break;
+      dariBaris += ukuranHalaman;
     }
 
+    const hitung: Record<string, number> = {};
+
+    (data || []).forEach((tps: any) => {
+      const rtCakupan = tps.rt_cakupan || [];
+      const rwCakupan = tps.rw_cakupan || [];
+
+      const jumlah = semuaPenduduk.filter((p: any) => {
+        const rt = String(p.RT ?? '').padStart(3, '0');
+        const rw = String(p.RW ?? '').padStart(3, '0');
+        const tpsManual = String(p.TPS || '').trim();
+
+        // Kalau sudah pernah di-assign manual, pakai itu (override)
+        if (tpsManual) return tpsManual === String(tps.nomor_tps).trim();
+
+        // Kalau belum, tentukan otomatis dari cakupan RT/RW TPS
+        return rtCakupan.includes(rt) && rwCakupan.includes(rw);
+      }).length;
+
+      hitung[tps.nomor_tps] = jumlah;
+    });
+
+    setJumlahDPTPerTPS(hitung);
     setLoadingTPSMaster(false);
   }
 
@@ -3665,6 +3703,211 @@ async function fetchStatusLoginAkun() {
       return { ...prev, rw_cakupan: updated };
     });
   }
+
+async function exportTemplateAssignTPS() {
+  setLoadingExportTemplateTPS(true);
+  try {
+    let semuaData: any[] = [];
+    let dariBaris = 0;
+    const ukuranHalaman = 1000;
+
+    // Ambil semua pemilih yang statusnya udah layak masuk DPT/TPS
+    // (Ditemui + divalidasi admin) — sesuaikan filter ini kalau maunya beda
+    while (true) {
+      const { data, error } = await supabase
+        .from('penduduk')
+        .select('NAMA, NIK, NKK, DUSUN, RT, RW, TPS')
+        .eq('status_coklit', 'Ditemui')
+        .eq('divalidasi_admin', true)
+        .order('NAMA', { ascending: true })
+        .range(dariBaris, dariBaris + ukuranHalaman - 1);
+
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      semuaData = semuaData.concat(data);
+      if (data.length < ukuranHalaman) break;
+      dariBaris += ukuranHalaman;
+    }
+
+    if (semuaData.length === 0) {
+      alert('Belum ada data pemilih yang siap di-assign TPS (harus status "Ditemui" dan sudah divalidasi admin).');
+      setLoadingExportTemplateTPS(false);
+      return;
+    }
+
+    const rows = semuaData.map((item, idx) => ({
+      No: idx + 1,
+      NAMA: item.NAMA,
+      NIK: item.NIK,
+      NKK: item.NKK || '',
+      DUSUN: item.DUSUN || '',
+      RT: item.RT || '',
+      RW: item.RW || '',
+      TPS: item.TPS || '',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Template TPS');
+    XLSX.writeFile(
+      workbook,
+      `Template_Assign_TPS_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+  } catch (err: any) {
+    alert('Gagal membuat template: ' + err.message);
+  }
+  setLoadingExportTemplateTPS(false);
+}
+
+ async function prosesImportAssignTPS(file: File) {
+  setLoadingImportAssignTPS(true);
+  setHasilImportAssignTPS(null);
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    function ambilKolom(row: any, namaKolom: string) {
+      const key = Object.keys(row).find(
+        (k) => k.trim().toUpperCase() === namaKolom.toUpperCase()
+      );
+      return key ? String(row[key]).trim() : '';
+    }
+
+    // 1. Ekstrak Semua Kolom dari Excel
+    const daftarBaris = rows
+      .map((row) => {
+        let tps = ambilKolom(row, 'TPS');
+        if (tps && tps.length === 1) tps = tps.padStart(2, '0');
+
+        let rt = ambilKolom(row, 'RT');
+        if (rt && rt.length < 3) rt = rt.padStart(3, '0');
+
+        let rw = ambilKolom(row, 'RW');
+        if (rw && rw.length < 3) rw = rw.padStart(3, '0');
+
+        return {
+          nik: ambilKolom(row, 'NIK'),
+          nama: ambilKolom(row, 'NAMA'),
+          tps: tps,
+          nkk: ambilKolom(row, 'NKK'),
+          alamat: ambilKolom(row, 'ALAMAT'),
+          dusun: ambilKolom(row, 'DUSUN'),
+          rt: rt,
+          rw: rw,
+          kelamin: ambilKolom(row, 'KELAMIN') || ambilKolom(row, 'JENIS KELAMIN') || ambilKolom(row, 'P/L'),
+          tempat_lahir: ambilKolom(row, 'TEMPAT LAHIR') || ambilKolom(row, 'TEMPAT_LAHIR'),
+        };
+      })
+      .filter((r) => r.nik !== '' && r.tps !== '');
+
+    if (daftarBaris.length === 0) {
+      alert('Tidak ditemukan data dengan kolom NIK dan TPS yang terisi.');
+      setLoadingImportAssignTPS(false);
+      return;
+    }
+
+    // 2. Cek NIK mana yang sudah ada di Supabase
+    const petaNikKeId: Record<string, string> = {};
+    const CHUNK_SELECT = 500;
+    
+    for (let i = 0; i < daftarBaris.length; i += CHUNK_SELECT) {
+      const chunk = daftarBaris.slice(i, i + CHUNK_SELECT);
+      const niks = chunk.map((c) => c.nik);
+
+      const { data: dataDitemukan, error } = await supabase
+        .from('penduduk')
+        .select('id, NIK')
+        .in('NIK', niks);
+
+      if (!error && dataDitemukan) {
+        dataDitemukan.forEach((d) => {
+          petaNikKeId[d.NIK] = d.id;
+        });
+      }
+    }
+
+    let berhasilUpdate = 0;
+    let berhasilInsert = 0;
+    const gagal: string[] = [];
+    const validUpdates: any[] = [];
+    const newInserts: any[] = [];
+
+    // 3. Pisahkan mana yang UPDATE dan mana yang INSERT BARU
+    daftarBaris.forEach((baris) => {
+      const id = petaNikKeId[baris.nik];
+      if (id) {
+        // NIK Ketemu -> Masuk antrean Update
+        validUpdates.push({ id, tps: baris.tps, nama: baris.nama || baris.nik });
+      } else {
+        // NIK Tidak Ketemu -> Masuk antrean Otomatis Bikin Baru (Ditemui & Divalidasi)
+        newInserts.push({
+          NIK: baris.nik,
+          NAMA: baris.nama,
+          TPS: baris.tps,
+          NKK: baris.nkk || null,
+          ALAMAT: baris.alamat || null,
+          DUSUN: baris.dusun || null,
+          RT: baris.rt || null,
+          RW: baris.rw || null,
+          KELAMIN: baris.kelamin || null,
+          TEMPAT_LAHIR: baris.tempat_lahir || null,
+          status_coklit: 'Ditemui',
+          divalidasi_admin: true,
+          tanggal_validasi: new Date().toISOString(),
+          divalidasi_oleh: user?.nama_lengkap || 'Sistem Import TPS',
+          sumber_data: 'Import Excel'
+        });
+      }
+    });
+
+    const CHUNK_EXECUTE = 100;
+    
+    // 4. Eksekusi Update (Yang datanya sudah ada di database)
+    for (let i = 0; i < validUpdates.length; i += CHUNK_EXECUTE) {
+      const chunk = validUpdates.slice(i, i + CHUNK_EXECUTE);
+      const promises = chunk.map((item) =>
+        supabase.from('penduduk').update({ TPS: item.tps }).eq('id', item.id)
+      );
+      const results = await Promise.all(promises);
+      results.forEach((res, idx) => {
+        if (res.error) gagal.push(`${chunk[idx].nama} (Update) — ${res.error.message}`);
+        else berhasilUpdate += 1;
+      });
+    }
+
+    // 5. Eksekusi Insert (Data baru aja ketemu di Excel)
+    if (newInserts.length > 0) {
+      for (let i = 0; i < newInserts.length; i += CHUNK_EXECUTE) {
+        const chunk = newInserts.slice(i, i + CHUNK_EXECUTE);
+        const { error } = await supabase.from('penduduk').insert(chunk);
+        if (error) {
+          gagal.push(`Gagal Insert ${chunk.length} data baru — ${error.message}`);
+        } else {
+          berhasilInsert += chunk.length;
+        }
+      }
+    }
+
+    setHasilImportAssignTPS({ 
+      totalDiproses: daftarBaris.length, 
+      berhasil: berhasilUpdate + berhasilInsert, 
+      detail: `${berhasilUpdate} NIK diupdate TPS-nya, dan ${berhasilInsert} warga ditambahkan otomatis ke DPS`,
+      gagal 
+    });
+    
+    // Refresh otomatis
+    fetchTPSMaster(); 
+    fetchDPS();
+    
+  } catch (err: any) {
+    alert('Gagal memproses file: ' + err.message);
+  }
+
+  setLoadingImportAssignTPS(false);
+}
 
   async function simpanTPS(e: React.FormEvent) {
     e.preventDefault();
@@ -3731,28 +3974,123 @@ async function fetchStatusLoginAkun() {
     );
   }
 
-  async function fetchPemilihPerTPS(nomorTPS: string) {
+    function bukaImportTPS(item: any) {
+    setModalImportTPS(item);
+    setHasilImportTPS(null);
+  }
+
+  async function prosesImportTPS(file: File) {
+    if (!modalImportTPS) return;
+    setLoadingImportTPS(true);
+    setHasilImportTPS(null);
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+      // Cari kolom NIK, fleksibel terhadap variasi huruf besar/kecil & spasi
+      const daftarNIK = rows
+        .map((row) => {
+          const key = Object.keys(row).find(
+            (k) => k.trim().toUpperCase() === 'NIK'
+          );
+          return key ? String(row[key]).trim() : '';
+        })
+        .filter((nik) => nik !== '');
+
+      if (daftarNIK.length === 0) {
+        alert(
+          'Tidak ditemukan kolom "NIK" yang valid di file ini. Pastikan baris pertama ada header kolom bernama NIK.'
+        );
+        setLoadingImportTPS(false);
+        return;
+      }
+
+      // Cek NIK mana yang cocok dengan data di database
+      const { data: dataDitemukan, error } = await supabase
+        .from('penduduk')
+        .select('id, NAMA, NIK')
+        .in('NIK', daftarNIK);
+
+      if (error) throw error;
+
+      const nikDitemukanSet = new Set((dataDitemukan || []).map((d) => d.NIK));
+      const nikGagal = daftarNIK.filter((nik) => !nikDitemukanSet.has(nik));
+      const idsToUpdate = (dataDitemukan || []).map((d) => d.id);
+
+      if (idsToUpdate.length > 0) {
+        const { error: errUpdate } = await supabase
+          .from('penduduk')
+          .update({ TPS: modalImportTPS.nomor_tps })
+          .in('id', idsToUpdate);
+
+        if (errUpdate) throw errUpdate;
+      }
+
+      setHasilImportTPS({
+        totalDiproses: daftarNIK.length,
+        berhasil: idsToUpdate.length,
+        gagal: nikGagal,
+      });
+
+      // Refresh supaya jumlah DPT per TPS & daftar pemilih ikut update
+      fetchTPSMaster();
+    } catch (err: any) {
+      alert('Gagal memproses file: ' + err.message);
+    }
+
+    setLoadingImportTPS(false);
+  }
+
+  // ==========================================
+// FUNGSI DAFTAR PEMILIH PER TPS — FIXED
+// Sekarang terima objek TPS utuh (butuh rt_cakupan/rw_cakupan-nya)
+// ==========================================
+async function fetchPemilihPerTPS(tps: any) {
   setLoadingPemilihPerTPS(true);
 
-  const { data, error } = await supabase
-    .from('penduduk')
-    .select('*')
-    .eq('status_coklit', 'Ditemui')
-    .eq('divalidasi_admin', true)
-    .not(
-      'status_coklit',
-      'in',
-      '("Meninggal","Pindah","Tidak Dikenal","Perlu Koreksi","Belum Coklit")'
-    )
-    .eq('TPS', nomorTPS)
-    .order('NAMA', { ascending: true });
+  const rtCakupan = tps.rt_cakupan || [];
+  const rwCakupan = tps.rw_cakupan || [];
 
-  if (error) {
+  let semuaData: any[] = [];
+  let dariBaris = 0;
+  const ukuranHalaman = 1000;
+
+  try {
+    while (true) {
+      const { data, error } = await supabase
+        .from('penduduk')
+        .select('*')
+        .eq('status_coklit', 'Ditemui')
+        .eq('divalidasi_admin', true)
+        .order('NAMA', { ascending: true })
+        .range(dariBaris, dariBaris + ukuranHalaman - 1);
+
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+
+      semuaData = semuaData.concat(data);
+      if (data.length < ukuranHalaman) break;
+      dariBaris += ukuranHalaman;
+    }
+
+    const hasil = semuaData.filter((p: any) => {
+      const rt = String(p.RT ?? '').padStart(3, '0');
+      const rw = String(p.RW ?? '').padStart(3, '0');
+      const tpsManual = String(p.TPS || '').trim();
+
+      if (tpsManual) return tpsManual === String(tps.nomor_tps).trim();
+      return rtCakupan.includes(rt) && rwCakupan.includes(rw);
+    });
+
+    setDataPemilihPerTPS(hasil);
+  } catch (error: any) {
     console.error('Error Supabase (Pemilih per TPS):', error);
     alert('Error saat mengambil daftar pemilih TPS ini: ' + error.message);
-  } else {
-    setDataPemilihPerTPS(data || []);
   }
+
   setLoadingPemilihPerTPS(false);
 }
 
@@ -3791,7 +4129,7 @@ function bukaDaftarTPS(item: any) {
   setSelectedBelumDitentukan([]);
   setSearchSudahDiTPS('');
   setSearchBelumDitentukan('');
-  fetchPemilihPerTPS(item.nomor_tps);
+  fetchPemilihPerTPS(item);
 }
 
 function toggleSelectBelumDitentukan(id: string) {
@@ -3816,7 +4154,7 @@ async function assignMassalKeTPS() {
 
   if (
     !confirm(
-      `Assign ${selectedBelumDitentukan.length} pemilih ke TPS ${modalDaftarTPS.nomor_tps}?`
+      `Assign ${selectedBelumDitentukan.length} pemilih ke TPS ${modalDaftarTPS}?`
     )
   )
     return;
@@ -3825,7 +4163,7 @@ async function assignMassalKeTPS() {
 
   const { data, error } = await supabase
     .from('penduduk')
-    .update({ TPS: modalDaftarTPS.nomor_tps })
+    .update({ TPS: modalDaftarTPS })
     .in('id', selectedBelumDitentukan)
     .select();
 
@@ -3838,7 +4176,7 @@ async function assignMassalKeTPS() {
   } else {
     setSelectedBelumDitentukan([]);
     fetchBelumDitentukan();
-    fetchPemilihPerTPS(modalDaftarTPS.nomor_tps);
+    fetchPemilihPerTPS(modalDaftarTPS);
   }
 }
 
@@ -5349,109 +5687,152 @@ const dataBelumDitentukanFiltered = useMemo(() => {
           )}
 
             {activeMenu === 'TPS' && (
-            <div className="max-w-6xl mx-auto pb-10">
-              <div className="flex justify-between items-end mb-6">
-                <div>
-                  <h2 className="text-2xl font-black text-slate-900">
-                    Tempat Pemungutan Suara
-                  </h2>
-                  <p className="text-sm text-slate-500 font-bold mt-1">
-                    Kelola lokasi TPS dan cakupan RT/RW masing-masing.
-                  </p>
-                </div>
-                {(user.role === 'Super Admin' || user.role === 'Admin') && (
+  <div className="max-w-6xl mx-auto pb-10">
+    
+    {/* HEADER TUNGGAL YANG LEBIH RAPI */}
+    <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-6 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+      <div>
+        <h2 className="text-2xl font-black text-slate-900">
+          Tempat Pemungutan Suara
+        </h2>
+        <p className="text-sm text-slate-500 font-bold mt-1">
+          Kelola lokasi TPS dan assign pemilih massal via Import Excel.
+        </p>
+      </div>
+      {(user.role === 'Super Admin' || user.role === 'Admin') && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={exportTemplateAssignTPS}
+            disabled={loadingExportTemplateTPS}
+            className="px-4 py-2.5 bg-slate-50 border-2 border-slate-200 text-slate-700 font-bold text-sm rounded-xl hover:bg-slate-100 hover:border-slate-300 transition-all disabled:opacity-50"
+          >
+            {loadingExportTemplateTPS ? 'Menyiapkan...' : '↓ Download Template'}
+          </button>
+          
+          <label className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow-sm cursor-pointer transition-all">
+            {loadingImportAssignTPS ? 'Memproses...' : '↑ Import Data TPS'}
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              disabled={loadingImportAssignTPS}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) prosesImportAssignTPS(file);
+                // Reset input biar bisa upload file yang sama jika salah
+                e.target.value = ''; 
+              }}
+            />
+          </label>
+
+          <button
+            onClick={bukaTambahTPS}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all"
+          >
+            + Tambah TPS
+          </button>
+        </div>
+      )}
+    </div>
+
+    {/* HASIL IMPORT ASSIGN MASSAL */}
+    {hasilImportAssignTPS && (
+      <div className="mb-6 animate-in fade-in slide-in-from-top-2">
+        <span>
+          ✓ {hasilImportAssignTPS.berhasil} dari {hasilImportAssignTPS.totalDiproses} data berhasil diproses.
+          {hasilImportAssignTPS.detail && ` (${hasilImportAssignTPS.detail})`}
+        </span>
+        {hasilImportAssignTPS.gagal.length > 0 && (
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm font-bold shadow-sm mt-3">
+            <p className="mb-2 flex items-center gap-2">
+              <span className="bg-red-500 text-white px-2 py-0.5 rounded text-[10px]">INFO</span> 
+              Ada {hasilImportAssignTPS.gagal.length} baris gagal diproses:
+            </p>
+            <div className="max-h-40 overflow-y-auto text-xs bg-white border border-red-100 rounded-lg p-3 font-mono leading-relaxed">
+              {hasilImportAssignTPS.gagal.map((g: string, i: number) => (
+                <div key={i} className="border-b border-red-50 py-1 last:border-0">{g}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        <button
+          onClick={() => setHasilImportAssignTPS(null)}
+          className="mt-3 text-xs font-black uppercase text-slate-400 hover:text-slate-600 tracking-wider"
+        >
+          Tutup Notifikasi
+        </button>
+      </div>
+    )}
+
+    {/* KARTU LIST TPS */}
+    {loadingTPSMaster ? (
+      <div className="flex justify-center py-20">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
+      </div>
+    ) : dataTPSMaster.length === 0 ? (
+      <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400 shadow-sm">
+        Belum ada data TPS.
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {dataTPSMaster.map((item) => (
+          <div key={item.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col">
+            <div className="flex justify-between items-start mb-3">
+              <span className="w-12 h-12 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-lg shrink-0">
+                {item.nomor_tps}
+              </span>
+              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full text-[10px] font-black uppercase">
+                {jumlahDPTPerTPS[item.nomor_tps] || 0} DPT
+              </span>
+            </div>
+            <h3 className="font-black text-slate-900 mb-1">
+              {item.nama_lokasi || `TPS ${item.nomor_tps}`}
+            </h3>
+            <p className="text-xs font-bold text-slate-500">
+              {item.alamat || 'Alamat belum diisi'}
+            </p>
+            <p className="text-xs font-bold text-slate-400 mt-1">
+              Dusun {item.dusun || '-'}
+              {item.rt_cakupan?.length > 0 && ` · RT ${item.rt_cakupan.join(', ')}`}
+              {item.rw_cakupan?.length > 0 && ` / RW ${item.rw_cakupan.join(', ')}`}
+            </p>
+
+            <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
+              <button
+                onClick={() => bukaGoogleMapsTPS(item)}
+                className="flex-1 py-2 bg-indigo-50 hover:bg-indigo-500 hover:text-white text-indigo-700 font-bold text-xs rounded-lg transition-colors border border-indigo-100 flex items-center justify-center gap-1.5"
+              >
+                Arahkan
+              </button>
+              {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                <>
                   <button
-                    onClick={bukaTambahTPS}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all flex items-center gap-2"
+                    onClick={() => bukaEditTPS(item)}
+                    className="px-4 py-2 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-lg transition-colors border border-slate-200"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"></path>
-                    </svg>
-                    Tambah TPS
+                    Edit
                   </button>
-                )}
-              </div>
-
-              {loadingTPSMaster ? (
-                <div className="flex justify-center py-20">
-                  <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-emerald-600"></div>
-                </div>
-              ) : dataTPSMaster.length === 0 ? (
-                <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center font-bold text-slate-400">
-                  Belum ada data TPS.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {dataTPSMaster.map((item) => (
-                    <div
-                      key={item.id}
-                      className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col"
-                    >
-                      <div className="flex justify-between items-start mb-3">
-                        <span className="w-12 h-12 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-lg shrink-0">
-                          {item.nomor_tps}
-                        </span>
-                        <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full text-[10px] font-black uppercase">
-                          {jumlahDPTPerTPS[item.nomor_tps] || 0} DPT
-                        </span>
-                      </div>
-                      <h3 className="font-black text-slate-900 mb-1">
-                        {item.nama_lokasi || `TPS ${item.nomor_tps}`}
-                      </h3>
-                      <p className="text-xs font-bold text-slate-500">
-                        {item.alamat || 'Alamat belum diisi'}
-                      </p>
-                      <p className="text-xs font-bold text-slate-400 mt-1">
-                        Dusun {item.dusun || '-'}
-                        {item.rt_cakupan?.length > 0 &&
-                          ` · RT ${item.rt_cakupan.join(', ')}`}
-                        {item.rw_cakupan?.length > 0 &&
-                          ` / RW ${item.rw_cakupan.join(', ')}`}
-                      </p>
-
-                      <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
-                        <button
-                          onClick={() => bukaGoogleMapsTPS(item)}
-                          className="flex-1 py-2 bg-indigo-50 hover:bg-indigo-500 hover:text-white text-indigo-700 font-bold text-xs rounded-lg transition-colors border border-indigo-100 flex items-center justify-center gap-1.5"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                          </svg>
-                          Arahkan
-                        </button>
-                        {(user.role === 'Super Admin' || user.role === 'Admin') && (
-                          <>
-                            <button
-                              onClick={() => bukaEditTPS(item)}
-                              className="px-4 py-2 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-lg transition-colors border border-slate-200"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => hapusTPS(item)}
-                              className="px-4 py-2 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-xs rounded-lg transition-colors border border-red-100"
-                            >
-                              Hapus
-                            </button>
-                          </>
-                        )}
-                          <button
-                          onClick={() => bukaDaftarTPS(item)}
-                          className="w-full mt-2 py-2 bg-emerald-50 hover:bg-emerald-500 hover:text-white text-emerald-700 font-bold text-xs rounded-lg transition-colors border border-emerald-100 flex items-center justify-center gap-1.5"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 100-8 4 4 0 000 8zm6 3c0-1.657-3.582-3-8-3s-8 1.343-8 3v2h16v-2z"></path>
-                          </svg>
-                          Kelola Daftar Pemilih ({jumlahDPTPerTPS[item.nomor_tps] || 0})
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                  <button
+                    onClick={() => hapusTPS(item)}
+                    className="px-4 py-2 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-xs rounded-lg transition-colors border border-red-100"
+                  >
+                    Hapus
+                  </button>
+                </>
               )}
             </div>
-          )}
+            <button
+              onClick={() => bukaDaftarTPS(item)}
+              className="w-full mt-2 py-2 bg-emerald-50 hover:bg-emerald-500 hover:text-white text-emerald-700 font-bold text-xs rounded-lg transition-colors border border-emerald-100 flex items-center justify-center gap-1.5"
+            >
+              Keluar Daftar Pemilih ({jumlahDPTPerTPS[item.nomor_tps] || 0})
+            </button>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
 
           {activeMenu === 'Kandidat' && (
             <div className="max-w-6xl mx-auto pb-10">
@@ -10777,6 +11158,79 @@ const dataBelumDitentukanFiltered = useMemo(() => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+        {modalImportTPS && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-teal-600 p-5 flex justify-between items-center">
+              <div>
+                <h2 className="text-lg font-black text-white">Import Excel — TPS {modalImportTPS.nomor_tps}</h2>
+                <p className="text-xs font-bold text-teal-100 mt-0.5">{modalImportTPS.nama_lokasi || '-'}</p>
+              </div>
+              <button
+                onClick={() => setModalImportTPS(null)}
+                className="text-white/80 hover:text-white bg-teal-700 rounded-full p-1"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-teal-50 border border-teal-100 rounded-xl p-4 text-xs font-bold text-teal-700">
+                File harus punya kolom bernama <strong>NIK</strong> (header di baris pertama).
+                Semua warga dengan NIK yang cocok akan langsung diset ke TPS {modalImportTPS.nomor_tps},
+                menimpa TPS sebelumnya kalau sudah pernah di-assign ke TPS lain.
+              </div>
+
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                disabled={loadingImportTPS}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) prosesImportTPS(file);
+                }}
+                className="w-full p-3 border-2 border-dashed border-slate-300 rounded-xl font-bold text-sm cursor-pointer"
+              />
+
+              {loadingImportTPS && (
+                <div className="flex justify-center py-4">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-4 border-teal-600"></div>
+                </div>
+              )}
+
+              {hasilImportTPS && (
+                <div className="space-y-3">
+                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-4 rounded-xl text-sm font-bold">
+                    ✓ {hasilImportTPS.berhasil} dari {hasilImportTPS.totalDiproses} NIK berhasil di-assign ke TPS {modalImportTPS.nomor_tps}.
+                  </div>
+                  {hasilImportTPS.gagal.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm font-bold">
+                      <p className="mb-2">
+                        ⚠️ {hasilImportTPS.gagal.length} NIK tidak ditemukan di database:
+                      </p>
+                      <div className="max-h-40 overflow-y-auto font-mono text-xs bg-white/50 rounded-lg p-2">
+                        {hasilImportTPS.gagal.map((nik: string) => (
+                          <div key={nik}>{nik}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end">
+              <button
+                onClick={() => setModalImportTPS(null)}
+                className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-100"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}
