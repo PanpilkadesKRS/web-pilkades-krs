@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 /* ------------------------------------------------------------------ */
 /*  Target: hari pencoblosan — 20 September 2026, 07:00 WIB           */
@@ -17,11 +17,8 @@ type Petugas = {
 type WargaHasil = {
   nama: string;
   nik_tersamar: string | null;
-  kk_tersamar: string | null;
-  dusun: string;
-  rt: string;
-  rw: string;
-  tps: string | null; 
+  tps: string | null;
+  maps_url?: string | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -182,32 +179,56 @@ function LembarKontakPetugas({
 
 export default function CekDPS() {
   const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(true); // loading data awal, bukan loading submit
-  const [semuaWarga, setSemuaWarga] = useState<WargaHasil[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasilWarga, setHasilWarga] = useState<WargaHasil[]>([]);
+  const [sudahMencari, setSudahMencari] = useState(false);
   const [error, setError] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);  
 
   const { hari, jam, menit, detik, selesai } = useCountdown(TARGET);
 
- useEffect(() => {
-    setLoading(true);
-    setError('');
-    fetch('/api/cek-dps') // GET, bukan POST — endpoint baru yang ngembaliin SEMUA data
-      .then((r) => r.json())
-      .then((data: WargaHasil[]) => setSemuaWarga(Array.isArray(data) ? data : []))
-      .catch(() => setError('Gagal memuat data DPS. Cek koneksi internet Anda.'))
-      .finally(() => setLoading(false));
-  }, []);
+ const hasilFilter = hasilWarga;
+ async function handleCari(e: React.FormEvent) {
+  e.preventDefault();
 
-  const hasilFilter = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return semuaWarga;
-    return semuaWarga.filter(
-      (w) =>
-        w.nama.toLowerCase().includes(q) ||
-        (w.nik_tersamar ?? '').toLowerCase().includes(q)
-    );
-  }, [semuaWarga, query]);
+  const kataCari = query.trim();
+
+  if (kataCari.length < 3) {
+    setError('Masukkan minimal 3 karakter untuk pencarian.');
+    return;
+  }
+
+  setLoading(true);
+  setError('');
+  setSudahMencari(true);
+  setHasilWarga([]);
+
+  try {
+    const response = await fetch('/api/cek-dps', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: kataCari,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setError(data.error || 'Terjadi kesalahan saat mencari data.');
+      return;
+    }
+
+    setHasilWarga(data.hasil || []);
+  } catch (err) {
+    console.error(err);
+    setError('Gagal menghubungi server.');
+  } finally {
+    setLoading(false);
+  }
+}
 
   return (
     <main className="min-h-screen bg-[#FFFDF9]">
@@ -275,15 +296,25 @@ export default function CekDPS() {
               Masukkan nama lengkap atau NIK sesuai KTP
             </p>
 
-            <div className="mt-5">
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Cari nama lengkap atau NIK..."
-                className="w-full px-4 py-3.5 bg-[#FFFDF9] border-2 border-[#EDE6D3] rounded-xl font-semibold text-[#201D18] focus:border-[#1B6B3A] outline-none"
-              />
-            </div>
+            <form onSubmit={handleCari} className="mt-5">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Cari nama lengkap atau NIK..."
+                  className="flex-1 min-w-0 px-4 py-3.5 bg-[#FFFDF9] border-2 border-[#EDE6D3] rounded-xl font-semibold text-[#201D18] focus:border-[#1B6B3A] outline-none"
+                />
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-5 py-3.5 bg-[#1B6B3A] text-white font-bold rounded-xl hover:bg-[#14542D] disabled:opacity-50"
+                >
+                  {loading ? '...' : 'Cari'}
+                </button>
+              </div>
+            </form>
 
            {error && (
             <div className="mt-5 p-4 bg-red-50 border border-red-200 text-[#C81E1E] text-sm font-bold rounded-xl text-center">
@@ -297,7 +328,7 @@ export default function CekDPS() {
             </div>
           )}
 
-          {!loading && !error && (
+         {!loading && !error && sudahMencari && (
               <div className="mt-5">
                 <p className="text-xs font-bold text-[#8A6B10] mb-2">
                   {query.trim()
@@ -313,39 +344,93 @@ export default function CekDPS() {
                     </p>
                   </div>
                 ) : (
-                  <div className="border-2 border-[#EDE6D3] rounded-xl overflow-hidden">
-                    <div className="overflow-x-auto max-h-96 overflow-y-auto">
-                      <table className="w-full text-xs">
-                        <thead className="sticky top-0 bg-[#F2ECDA] z-10">
-                          <tr>
-                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">Nama</th>
-                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">NIK</th>
-                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">KK</th>
-                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">Dusun</th>
-                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">RT</th>
-                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">RW</th>
-                            <th className="px-3 py-2.5 text-left font-bold text-[#201D18] whitespace-nowrap">TPS</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {hasilFilter.map((w, idx) => (
-                            <tr
-                              key={idx}
-                              className={idx % 2 === 0 ? 'bg-white' : 'bg-[#FFFDF9]'}
+                <div className="space-y-4">
+                  {hasilFilter.map((w, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-2xl border border-[#E5E1D8] bg-white overflow-hidden shadow-sm"
+                    >
+                      {/* GARIS ATAS */}
+                      <div className="h-1 flex">
+                        <div className="w-1/3 bg-[#C81E1E]" />
+                        <div className="w-1/3 bg-[#D9A404]" />
+                        <div className="w-1/3 bg-[#1B6B3A]" />
+                      </div>
+
+                      <div className="p-5 space-y-5">
+
+                        {/* NAMA */}
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#999999]">
+                            Nama
+                          </p>
+
+                          <p className="mt-1 text-base font-black text-[#201D18]">
+                            {w.nama}
+                          </p>
+                        </div>
+
+                        {/* GARIS PEMBATAS */}
+                        <div className="border-t border-[#EEEAE2]" />
+
+                        {/* NIK */}
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#999999]">
+                            NIK
+                          </p>
+
+                          <p className="mt-1 font-mono text-sm font-bold text-[#555555]">
+                            {w.nik_tersamar ?? '-'}
+                          </p>
+                        </div>
+
+                        {/* GARIS PEMBATAS */}
+                        <div className="border-t border-[#EEEAE2]" />
+
+                        {/* TPS */}
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#999999]">
+                            Lokasi TPS
+                          </p>
+
+                          <div className="mt-2">
+                            <span className="inline-flex items-center rounded-lg bg-[#EEF3FF] px-3 py-2 text-sm font-black text-[#2463EB]">
+                              TPS {w.tps ?? '-'}
+                            </span>
+                          </div>
+
+                          {/* BUTTON GOOGLE MAPS */}
+                          {w.maps_url ? (
+                            <a
+                              href={w.maps_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#191919] px-4 py-3.5 text-sm font-black text-white transition active:scale-[0.98]"
                             >
-                              <td className="px-3 py-2 font-bold text-[#1B6B3A] whitespace-nowrap">{w.nama}</td>
-                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.nik_tersamar ?? '-'}</td>
-                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.kk_tersamar ?? '-'}</td>
-                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.dusun ?? '-'}</td>
-                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.rt ?? '-'}</td>
-                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.rw ?? '-'}</td>
-                              <td className="px-3 py-2 text-[#276B44] whitespace-nowrap">{w.tps ?? '-'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                className="h-5 w-5"
+                              >
+                                <path d="M12 21s7-5.5 7-12a7 7 0 1 0-14 0c0 6.5 7 12 7 12z" />
+                                <circle cx="12" cy="9" r="2.5" />
+                              </svg>
+
+                              Arahkan ke TPS
+                            </a>
+                          ) : (
+                            <div className="mt-3 rounded-xl bg-[#F5F5F5] px-4 py-3 text-center text-xs font-bold text-[#999999]">
+                              Lokasi TPS belum tersedia
+                            </div>
+                          )}
+                        </div>
+
+                      </div>
                     </div>
-                  </div>
+                  ))}
+                </div>
                 )}
               </div>
             )}

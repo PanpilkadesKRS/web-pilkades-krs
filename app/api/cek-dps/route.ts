@@ -1,3 +1,4 @@
+
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '../../../lib/supabaseAdmin';
 
@@ -9,6 +10,12 @@ type PendudukRow = {
   RT: string | null;
   RW: string | null;
   TPS?: string | null;
+};
+
+type TpsRow = {
+  nomor_tps: string;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 export async function POST(request: Request) {
@@ -53,7 +60,7 @@ export async function POST(request: Request) {
 
     let builder = supabaseAdmin
       .from('penduduk')
-      .select('NAMA, NIK, NKK, DUSUN, RT, RW');
+      .select('NAMA, NIK, NKK, DUSUN, RT, RW, TPS');
 
     for (const kata of kataKata) {
       builder = builder.or(
@@ -75,14 +82,51 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'kosong', hasil: [] });
     }
 
-    const hasilAman = hasil.map((w: PendudukRow) => ({
-      nama: w.NAMA,
-      nik_tersamar: w.NIK ? w.NIK.slice(0, 4) + '••••••••' + w.NIK.slice(-4) : null,
-      kk_tersamar: w.NKK ? w.NKK.slice(0, 4) + '••••••••' + w.NKK.slice(-4) : null,
-      dusun: w.DUSUN,
-      rt: w.RT,
-      rw: w.RW,
-    }));
+    const { data: dataTps, error: errorTps } = await supabaseAdmin
+      .from('tps')
+      .select('nomor_tps, latitude, longitude');
+
+    if (errorTps) {
+      console.error('Error mengambil data TPS:', errorTps);
+    }
+
+    const hasilAman = hasil.map((w: PendudukRow) => {
+      const nomorTpsPenduduk = String(w.TPS ?? '')
+        .replace(/^TPS\s*/i, '')
+        .trim();
+
+      const lokasiTps = (dataTps as TpsRow[] | null)?.find((t) => {
+        const nomorMaster = String(t.nomor_tps ?? '')
+          .replace(/^TPS\s*/i, '')
+          .trim();
+
+        return nomorMaster === nomorTpsPenduduk;
+      });
+
+      let mapsUrl: string | null = null;
+
+      if (
+        lokasiTps &&
+        lokasiTps.latitude !== null &&
+        lokasiTps.longitude !== null
+      ) {
+        mapsUrl =
+          `https://www.google.com/maps/dir/?api=1` +
+          `&destination=${lokasiTps.latitude},${lokasiTps.longitude}`;
+      }
+
+      return {
+        nama: w.NAMA,
+
+        nik_tersamar: w.NIK
+          ? w.NIK.slice(0, 4) + '••••••••' + w.NIK.slice(-4)
+          : null,
+
+        tps: w.TPS ?? null,
+
+        maps_url: mapsUrl,
+      };
+    });
 
     return NextResponse.json({ status: 'ditemukan', hasil: hasilAman });
   } catch (err: any) {
@@ -93,53 +137,7 @@ export async function POST(request: Request) {
     );
   }
 }
-
 export async function GET() {
-  try {
-    const pageSize = 1000;
-    let from = 0;
-    let semuaData: PendudukRow[] = [];
-
-    while (true) {
-      const { data, error } = await supabaseAdmin
-        .from('penduduk')
-        .select('NAMA, NIK, NKK, DUSUN, RT, RW, TPS')
-        .eq('status_coklit', 'Ditemui')
-        .order('NAMA', { ascending: true })
-        .range(from, from + pageSize - 1);
-
-      if (error) {
-        console.error('Error query semua penduduk:', error);
-        return NextResponse.json(
-          { error: 'Terjadi kesalahan saat memuat data.' },
-          { status: 500 }
-        );
-      }
-
-      if (!data || data.length === 0) break;
-
-      semuaData = semuaData.concat(data);
-
-      if (data.length < pageSize) break; // udah halaman terakhir
-      from += pageSize;
-    }
-
-    const hasilAman = semuaData.map((w) => ({
-      nama: w.NAMA,
-      nik_tersamar: w.NIK ? w.NIK.slice(0, 4) + '••••••••' + w.NIK.slice(-4) : null,
-      kk_tersamar: w.NKK ? w.NKK.slice(0, 4) + '••••••••' + w.NKK.slice(-4) : null,
-      dusun: w.DUSUN,
-      rt: w.RT,
-      rw: w.RW,
-      tps: w.TPS ?? null,
-    }));
-
-    return NextResponse.json(hasilAman);
-  } catch (err: any) {
-    console.error('Error dps GET:', err);
-    return NextResponse.json(
-      { error: 'Terjadi kesalahan server. Coba lagi nanti.' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json([]);
 }
+
