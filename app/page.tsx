@@ -1897,99 +1897,50 @@ export default function Home() {
     URL.revokeObjectURL(url);
   }
 
-  async function kirimKeDPT() {
-    const dataToSend =
-      selectedDPS.length > 0
-        ? dataDPSFiltered.filter((item) => selectedDPS.includes(item.id))
-        : dataDPSFiltered;
+ async function kirimKeDPT() {
+  const yakin = confirm(
+    `FINALISASI DPT\n\n` +
+    `Seluruh data DPS yang telah divalidasi akan ditetapkan sebagai DPT.\n\n` +
+    `Lanjutkan?`
+  );
 
-    if (dataToSend.length === 0) {
-      alert('Tidak ada data untuk dikirim ke DPT.');
-      return;
-    }
-    // CEK 1: NIK sementara (belum punya e-KTP) gak boleh masuk DPT
-    const nikSementara = dataToSend.filter((item) =>
-      item.NIK?.startsWith('SEMENTARA')
+  if (!yakin) return;
+
+  setLoadingKirimDPT(true);
+
+  const { data, error } = await supabase
+    .from('penduduk')
+    .update({
+      status_dpt: 'DPT',
+    })
+    .eq('status_coklit', 'Ditemui')
+    .eq('divalidasi_admin', true)
+    .is('status_dpt', null)
+    .select('id');
+
+  setLoadingKirimDPT(false);
+
+  if (error) {
+    console.error('ERROR FINALISASI DPT:', error);
+
+    alert(
+      `Gagal finalisasi DPT:\n\n` +
+      `${error.message}\n` +
+      `${error.details || ''}\n` +
+      `${error.hint || ''}`
     );
-    if (nikSementara.length > 0) {
-      alert(
-        `Tidak bisa lanjut: ${nikSementara.length} pemilih masih pakai NIK sementara (belum punya e-KTP resmi):\n\n` +
-          nikSementara.map((item) => `- ${item.NAMA}`).join('\n') +
-          `\n\nLengkapi NIK asli mereka dulu sebelum dikirim ke DPT.`
-      );
-      return;
-    }
-
-    // CEK 2: duplikat NIK di dalam data yang mau dikirim sendiri
-    const nikCount: Record<string, number> = {};
-    dataToSend.forEach((item) => {
-      nikCount[item.NIK] = (nikCount[item.NIK] || 0) + 1;
-    });
-    const nikDuplikatInternal = Object.keys(nikCount).filter(
-      (nik) => nikCount[nik] > 1
-    );
-    if (nikDuplikatInternal.length > 0) {
-      alert(
-        `Ditemukan NIK duplikat di dalam data yang mau dikirim:\n\n` +
-          nikDuplikatInternal.join('\n') +
-          `\n\nPerbaiki dulu data ini sebelum lanjut.`
-      );
-      return;
-    }
-
-    // CEK 3: apakah NIK-nya udah lebih dulu ada di tabel DPT
-    setLoadingKirimDPT(true);
-    const niks = dataToSend.map((item) => item.NIK);
-    const { data: existingDPT, error: cekError } = await supabase
-      .from('penduduk')
-      .select('NAMA, NIK')
-      .eq('status_dpt', 'DPT')
-      .in('NIK', niks);
-
-    if (cekError) {
-      setLoadingKirimDPT(false);
-      alert('Gagal mengecek duplikat: ' + cekError.message);
-      return;
-    }
-
-    if (existingDPT && existingDPT.length > 0) {
-      setLoadingKirimDPT(false);
-      alert(
-        `${existingDPT.length} NIK sudah lebih dulu terdaftar di DPT:\n\n` +
-          existingDPT.map((item) => `- ${item.NAMA} (${item.NIK})`).join('\n')
-      );
-      return;
-    }
-
-    if (
-      !confirm(
-        `Kirim ${dataToSend.length} pemilih ke DPT? Data yang sudah dikirim tidak akan tampil lagi di menu DPS.`
-      )
-    )
-      return;
-
-    setLoadingKirimDPT(true);
-
-    const ids = dataToSend.map((item) => item.id);
-
-    const { error } = await supabase
-      .from('penduduk')
-      .update({
-        status_dpt: 'DPT',
-        tanggal_masuk_dpt: new Date().toISOString(),
-      })
-      .in('id', ids);
-
-    setLoadingKirimDPT(false);
-
-    if (error) {
-      alert('Gagal mengirim ke DPT: ' + error.message);
-    } else {
-      alert(`${dataToSend.length} pemilih berhasil dimasukkan ke DPT.`);
-      setSelectedDPS([]);
-      fetchDPS();
-    }
+    return;
   }
+
+  alert(
+    `${data?.length || 0} pemilih berhasil ditetapkan sebagai DPT.`
+  );
+
+  setSelectedDPS([]);
+
+  await fetchDPS();
+  await fetchDPT();
+}
 
     async function fetchProgresDPSWilayah() {
   setLoadingProgresDPSWilayah(true);
@@ -2058,26 +2009,62 @@ export default function Home() {
 }
 
   async function fetchDPT() {
-    setLoadingDPT(true);
+  setLoadingDPT(true);
 
-    let query = supabase.from('penduduk').select('*').eq('status_dpt', 'DPT');
+  let semuaData: any[] = [];
+  let dariBaris = 0;
+  const ukuranHalaman = 1000;
 
-    if (searchDPT) {
-      query = query.or(`NAMA.ilike.%${searchDPT}%,NIK.ilike.%${searchDPT}%`);
+  try {
+    while (true) {
+      let query = supabase
+        .from('penduduk')
+        .select('*')
+        .eq('status_dpt', 'DPT');
+
+      if (searchDPT) {
+        query = query.or(
+          `NAMA.ilike.%${searchDPT}%,NIK.ilike.%${searchDPT}%`
+        );
+      }
+
+      if (filterRT_DPT !== 'Semua') {
+        query = query.eq('RT', filterRT_DPT);
+      }
+
+      if (filterRW_DPT !== 'Semua') {
+        query = query.eq('RW', filterRW_DPT);
+      }
+
+      const { data, error } = await query
+        .order('NAMA', { ascending: true })
+        .range(dariBaris, dariBaris + ukuranHalaman - 1);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        break;
+      }
+
+      semuaData = semuaData.concat(data);
+
+      if (data.length < ukuranHalaman) {
+        break;
+      }
+
+      dariBaris += ukuranHalaman;
     }
-    if (filterRT_DPT !== 'Semua') query = query.eq('RT', filterRT_DPT);
-    if (filterRW_DPT !== 'Semua') query = query.eq('RW', filterRW_DPT);
 
-    const { data, error } = await query.order('NAMA', { ascending: true });
+    setDataDPT(semuaData);
 
-    if (error) {
-      console.error('Error Supabase (DPT):', error);
-      alert('Error saat mengambil data DPT: ' + error.message);
-    } else {
-      setDataDPT(data || []);
-    }
-    setLoadingDPT(false);
+    console.log('TOTAL DPT TERAMBIL:', semuaData.length);
+  } catch (error: any) {
+    console.error('Error Supabase (DPT):', error);
+    alert('Error saat mengambil data DPT: ' + error.message);
   }
+
+  setLoadingDPT(false);
+}
 
   async function batalkanDariDPT(item: any) {
     if (
