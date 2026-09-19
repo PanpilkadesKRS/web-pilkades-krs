@@ -3307,11 +3307,30 @@ async function simpanEditPemilihBaru(e: React.FormEvent) {
   // ==========================================
   async function fetchDaftarAkun() {
     setLoadingAkun(true);
+
     const { data, error } = await supabase
       .from('akun_petugas')
-      .select('*')
+      .select(`
+        id,
+        username,
+        nama_lengkap,
+        role,
+        akses_menu,
+        rt_assigned,
+        rw_assigned,
+        tps_assigned,
+        no_wa,
+        auth_user_id
+      `)
       .order('role', { ascending: true });
-    if (!error) setDaftarAkun(data || []);
+
+    if (error) {
+      console.error('Gagal mengambil akun:', error);
+      alert('Gagal mengambil akun: ' + error.message);
+    } else {
+      setDaftarAkun(data || []);
+    }
+
     setLoadingAkun(false);
   }
 
@@ -3343,39 +3362,50 @@ async function simpanEditPemilihBaru(e: React.FormEvent) {
 
   async function simpanAkun(e: React.FormEvent) {
     e.preventDefault();
+    if (!modalAkun) return;
+
     setLoadingSimpan(true);
 
-    const payloadToSave = { ...modalAkun };
-    if (
-      payloadToSave.role !== 'Petugas Coklit' &&
-      payloadToSave.role !== 'KPPS'
-    ) {
-      payloadToSave.tps_assigned = null;
-    }
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    let error;
-    if (payloadToSave.id) {
-      const res = await supabase
-        .from('akun_petugas')
-        .update(payloadToSave)
-        .eq('id', payloadToSave.id);
-      error = res.error;
-    } else {
-      const res = await supabase.from('akun_petugas').insert(payloadToSave);
-      error = res.error;
-    }
-
-    setLoadingSimpan(false);
-
-    if (error) {
-      alert('Gagal menyimpan akun: ' + error.message);
-    } else {
-      if (modalAkun.id === user.id) {
-        setUser(modalAkun);
-        localStorage.setItem('sesiPetugasPilkades', JSON.stringify(modalAkun));
+      if (!session) {
+        throw new Error('Sesi admin sudah habis. Silakan login ulang.');
       }
+
+      const response = await fetch('/api/admin-akun', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: modalAkun.id ? 'update' : 'create',
+          akun: modalAkun,
+        }),
+      });
+
+      const hasil = await response.json();
+
+      if (!response.ok) {
+        throw new Error(hasil.error || 'Gagal menyimpan akun');
+      }
+
+      alert(
+        modalAkun.id
+          ? 'Akun berhasil diperbarui.'
+          : 'Akun berhasil dibuat dan sudah bisa digunakan untuk login.'
+      );
+
       setModalAkun(null);
-      fetchDaftarAkun();
+      await fetchDaftarAkun();
+    } catch (err: any) {
+      console.error(err);
+      alert('Gagal menyimpan akun: ' + err.message);
+    } finally {
+      setLoadingSimpan(false);
     }
   }
 
@@ -3475,10 +3505,48 @@ async function fetchStatusLoginAkun() {
   setLoadingStatusLogin(false);
 }
 
-  async function hapusAkun(id: string, nama: string) {
-    if (confirm(`Yakin ingin menghapus akun ${nama}?`)) {
-      await supabase.from('akun_petugas').delete().eq('id', id);
-      fetchDaftarAkun();
+  async function hapusAkun(akun: any) {
+    const yakin = confirm(
+      `Yakin ingin menghapus akun ${akun.nama_lengkap}?\n\n` +
+      `Akun login, profil petugas, dan riwayat login akan dihapus.`
+    );
+
+    if (!yakin) return;
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        throw new Error('Sesi admin sudah habis. Silakan login ulang.');
+      }
+
+      const response = await fetch('/api/admin-akun', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: 'delete',
+          akun: {
+            id: akun.id,
+          },
+        }),
+      });
+
+      const hasil = await response.json();
+
+      if (!response.ok) {
+        throw new Error(hasil.error || 'Gagal menghapus akun');
+      }
+
+      alert(`Akun ${akun.nama_lengkap} berhasil dihapus.`);
+      await fetchDaftarAkun();
+    } catch (err: any) {
+      console.error(err);
+      alert('Gagal menghapus akun: ' + err.message);
     }
   }
 
@@ -10188,7 +10256,7 @@ async function cetakPlanoTPS(row: any) {
                           Edit Akses
                         </button>
                         <button
-                          onClick={() => hapusAkun(akun.id, akun.nama_lengkap)}
+                          onClick={() => hapusAkun(akun)}
                           className="px-4 py-2 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-xs rounded-lg transition-colors border border-red-100"
                         >
                           Hapus
@@ -10314,11 +10382,19 @@ async function cetakPlanoTPS(row: any) {
                       Password
                     </label>
                     <input
-                      type="text"
-                      required
-                      value={modalAkun.password}
+                      type="password"
+                      required={!modalAkun.id}
+                      value={modalAkun.password || ''}
+                      placeholder={
+                        modalAkun.id
+                          ? 'Kosongkan jika password tidak diganti'
+                          : 'Masukkan password'
+                      }
                       onChange={(e) =>
-                        setModalAkun({ ...modalAkun, password: e.target.value })
+                        setModalAkun({
+                          ...modalAkun,
+                          password: e.target.value,
+                        })
                       }
                       className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
                     />
