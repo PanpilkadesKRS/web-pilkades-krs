@@ -4411,34 +4411,104 @@ const dataBelumDitentukanFiltered = useMemo(() => {
   async function fetchSaksi() {
     setLoadingSaksi(true);
 
-    const { data, error } = await supabase
-      .from('saksi')
-      .select('*, kandidat:kandidat_id(nama, nomor_urut), tps:tps_id(nomor_tps, nama_lokasi)')
-      .order('created_at', { ascending: false });
+    try {
+      let query = supabase
+        .from('saksi')
+        .select(
+          '*, kandidat:kandidat_id(nama, nomor_urut), tps:tps_id(nomor_tps, nama_lokasi)'
+        )
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error Supabase (Saksi):', error);
-      alert('Error saat mengambil data saksi: ' + error.message);
-    } else {
+      // ==========================================
+      // KPPS HANYA SAKSI TPS SENDIRI
+      // ==========================================
+      if (user?.role === 'KPPS') {
+        if (!user?.tps_assigned) {
+          setDataSaksi([]);
+          setLoadingSaksi(false);
+          return;
+        }
+
+        const { data: tpsAkun, error: errorTPS } =
+          await supabase
+            .from('tps')
+            .select('id, nomor_tps')
+            .eq('nomor_tps', user.tps_assigned)
+            .single();
+
+        if (errorTPS || !tpsAkun) {
+          throw new Error(
+            `TPS ${user.tps_assigned} tidak ditemukan di master TPS.`
+          );
+        }
+
+        query = query.eq('tps_id', tpsAkun.id);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        throw error;
+      }
+
       setDataSaksi(data || []);
+    } catch (err: any) {
+      console.error('Error Supabase (Saksi):', err);
+      alert('Error saat mengambil data saksi: ' + err.message);
+      setDataSaksi([]);
+    } finally {
+      setLoadingSaksi(false);
     }
-    setLoadingSaksi(false);
   }
 
   const dataSaksiFiltered = useMemo(() => {
-    if (filterTPS_Saksi === 'Semua') return dataSaksi;
-    return dataSaksi.filter((s) => s.tps?.nomor_tps === filterTPS_Saksi);
-  }, [dataSaksi, filterTPS_Saksi]);
+    // KPPS datanya sudah dikunci dari query
+    if (user?.role === 'KPPS') {
+      return dataSaksi;
+    }
 
-  function bukaTambahSaksi() {
-    setModalSaksi({
-      nama: '',
-      kandidat_id: '',
-      tps_id: '',
-      no_hp: '',
-      nik: '',
-    });
+    if (filterTPS_Saksi === 'Semua') {
+      return dataSaksi;
+    }
+
+    return dataSaksi.filter(
+      (s) => s.tps?.nomor_tps === filterTPS_Saksi
+    );
+  }, [dataSaksi, filterTPS_Saksi, user]);
+
+  async function bukaTambahSaksi() {
+  let tpsId = '';
+
+  if (user?.role === 'KPPS') {
+    if (!user?.tps_assigned) {
+      alert('Akun KPPS ini belum memiliki TPS penugasan.');
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('tps')
+      .select('id, nomor_tps')
+      .eq('nomor_tps', user.tps_assigned)
+      .single();
+
+    if (error || !data) {
+      alert(
+        `TPS ${user.tps_assigned} tidak ditemukan di master TPS.`
+      );
+      return;
+    }
+
+    tpsId = data.id;
   }
+
+  setModalSaksi({
+    nama: '',
+    kandidat_id: '',
+    tps_id: tpsId,
+    no_hp: '',
+    nik: '',
+  });
+}
 
   function bukaEditSaksi(item: any) {
     setModalSaksi({
@@ -4451,36 +4521,106 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     });
   }
 
-  async function simpanSaksi(e: React.FormEvent) {
+    async function simpanSaksi(e: React.FormEvent) {
     e.preventDefault();
     if (!modalSaksi) return;
 
     setLoadingSimpanSaksi(true);
 
-    const payload: any = {
-      nama: modalSaksi.nama,
-      kandidat_id: modalSaksi.kandidat_id || null,
-      tps_id: modalSaksi.tps_id || null,
-      no_hp: modalSaksi.no_hp || null,
-      nik: modalSaksi.nik || null,
-    };
+    try {
+      let tpsIdFinal = modalSaksi.tps_id;
 
-    let error;
-    if (modalSaksi.id) {
-      const res = await supabase.from('saksi').update(payload).eq('id', modalSaksi.id);
-      error = res.error;
-    } else {
-      const res = await supabase.from('saksi').insert(payload);
-      error = res.error;
-    }
+      // ==========================================
+      // KPPS WAJIB TPS SENDIRI
+      // ==========================================
+      if (user?.role === 'KPPS') {
+        if (!user?.tps_assigned) {
+          throw new Error(
+            'Akun KPPS belum memiliki TPS penugasan.'
+          );
+        }
 
-    setLoadingSimpanSaksi(false);
+        const { data: tpsAkun, error: errorTPS } =
+          await supabase
+            .from('tps')
+            .select('id, nomor_tps')
+            .eq('nomor_tps', user.tps_assigned)
+            .single();
 
-    if (error) {
-      alert('Gagal menyimpan saksi: ' + error.message);
-    } else {
+        if (errorTPS || !tpsAkun) {
+          throw new Error(
+            `TPS ${user.tps_assigned} tidak ditemukan.`
+          );
+        }
+
+        // Paksa selalu TPS milik akun
+        tpsIdFinal = tpsAkun.id;
+
+        // Kalau edit, pastikan saksi memang milik TPS dia
+        if (modalSaksi.id) {
+          const { data: saksiLama, error: errorSaksi } =
+            await supabase
+              .from('saksi')
+              .select('id, tps_id')
+              .eq('id', modalSaksi.id)
+              .single();
+
+          if (
+            errorSaksi ||
+            !saksiLama ||
+            saksiLama.tps_id !== tpsAkun.id
+          ) {
+            throw new Error(
+              'Akses ditolak. Saksi tersebut bukan bagian dari TPS Anda.'
+            );
+          }
+        }
+      }
+
+      if (!tpsIdFinal) {
+        throw new Error('TPS wajib dipilih.');
+      }
+
+      const payload: any = {
+        nama: modalSaksi.nama,
+        kandidat_id: modalSaksi.kandidat_id || null,
+        tps_id: tpsIdFinal,
+        no_hp: modalSaksi.no_hp || null,
+        nik: modalSaksi.nik || null,
+      };
+
+      let error;
+
+      if (modalSaksi.id) {
+        let query = supabase
+          .from('saksi')
+          .update(payload)
+          .eq('id', modalSaksi.id);
+
+        if (user?.role === 'KPPS') {
+          query = query.eq('tps_id', tpsIdFinal);
+        }
+
+        const res = await query;
+        error = res.error;
+      } else {
+        const res = await supabase
+          .from('saksi')
+          .insert(payload);
+
+        error = res.error;
+      }
+
+      if (error) {
+        throw error;
+      }
+
       setModalSaksi(null);
-      fetchSaksi();
+      await fetchSaksi();
+    } catch (err: any) {
+      alert('Gagal menyimpan saksi: ' + err.message);
+    } finally {
+      setLoadingSimpanSaksi(false);
     }
   }
 
@@ -7846,7 +7986,11 @@ async function cetakPlanoTPS(row: any) {
                     Daftar saksi tiap kandidat per TPS, dan status kehadiran hari-H.
                   </p>
                 </div>
-                {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                {(
+                    user.role === 'Super Admin' ||
+                    user.role === 'Admin' ||
+                    user.role === 'KPPS'
+                  ) && (
                   <button
                     onClick={bukaTambahSaksi}
                     className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all flex items-center gap-2"
@@ -7985,7 +8129,11 @@ async function cetakPlanoTPS(row: any) {
                     Susunan petugas KPPS per TPS untuk keperluan SK dan dokumentasi.
                   </p>
                 </div>
-                {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                {(
+                    user.role === 'Super Admin' ||
+                    user.role === 'Admin' ||
+                    user.role === 'KPPS'
+                  ) && (
                   <button
                     onClick={bukaTambahAnggotaKPPS}
                     className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-all flex items-center gap-2"
