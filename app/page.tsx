@@ -4511,6 +4511,17 @@ const dataBelumDitentukanFiltered = useMemo(() => {
 }
 
   function bukaEditSaksi(item: any) {
+    if (
+      user?.role === 'KPPS' &&
+      String(item?.tps?.nomor_tps || '') !==
+        String(user?.tps_assigned || '')
+    ) {
+      alert(
+        `Akses ditolak. Akun ini hanya boleh mengelola saksi TPS ${user.tps_assigned}.`
+      );
+      return;
+    }
+
     setModalSaksi({
       id: item.id,
       nama: item.nama,
@@ -8004,30 +8015,41 @@ async function cetakPlanoTPS(row: any) {
               </div>
 
               <div className="flex flex-wrap gap-2 mb-6">
-                <button
-                  onClick={() => setFilterTPS_Saksi('Semua')}
-                  className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
-                    filterTPS_Saksi === 'Semua'
-                      ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
-                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                  }`}
-                >
-                  Semua TPS
-                </button>
-                {dataTPSMaster.map((t) => (
+              {user?.role === 'KPPS' ? (
+                <div className="px-4 py-2 bg-indigo-50 border-2 border-indigo-200 text-indigo-700 rounded-full text-xs font-black uppercase tracking-wide">
+                  TPS Penugasan: {user.tps_assigned || '-'}
+                </div>
+              ) : (
+                <>
                   <button
-                    key={t.id}
-                    onClick={() => setFilterTPS_Saksi(t.nomor_tps)}
+                    onClick={() => setFilterTPS_Saksi('Semua')}
                     className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
-                      filterTPS_Saksi === t.nomor_tps
+                      filterTPS_Saksi === 'Semua'
                         ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
                         : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
                     }`}
                   >
-                    TPS {t.nomor_tps}
+                    Semua TPS
                   </button>
-                ))}
-              </div>
+
+                  {dataTPSMaster.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() =>
+                        setFilterTPS_Saksi(t.nomor_tps)
+                      }
+                      className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
+                        filterTPS_Saksi === t.nomor_tps
+                          ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      TPS {t.nomor_tps}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
 
               {loadingSaksi ? (
                 <div className="flex justify-center py-20">
@@ -8092,7 +8114,11 @@ async function cetakPlanoTPS(row: any) {
                             )}
                           </td>
                           <td className="p-4">
-                            {(user.role === 'Super Admin' || user.role === 'Admin') && (
+                            {(
+                                user.role === 'Super Admin' ||
+                                user.role === 'Admin' ||
+                                user.role === 'KPPS'
+                              ) && (  
                               <div className="flex gap-1.5">
                                 <button
                                   onClick={() => bukaEditSaksi(item)}
@@ -13437,23 +13463,41 @@ async function cetakPlanoTPS(row: any) {
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">
-                    Ditugaskan di TPS
-                  </label>
+               <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">
+                  Ditugaskan di TPS
+                </label>
+
+                {user?.role === 'KPPS' ? (
+                  <div className="w-full p-3 border-2 border-indigo-200 bg-indigo-50 text-indigo-700 rounded-xl font-black text-sm">
+                    TPS {user.tps_assigned || '-'}
+                  </div>
+                ) : (
                   <select
                     value={modalSaksi.tps_id}
-                    onChange={(e) => setModalSaksi({ ...modalSaksi, tps_id: e.target.value })}
+                    onChange={(e) =>
+                      setModalSaksi({
+                        ...modalSaksi,
+                        tps_id: e.target.value,
+                      })
+                    }
                     className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
                   >
-                    <option value="">-- Pilih TPS --</option>
+                    <option value="">
+                      -- Pilih TPS --
+                    </option>
+
                     {dataTPSMaster.map((t) => (
                       <option key={t.id} value={t.id}>
-                        TPS {t.nomor_tps} {t.nama_lokasi ? `- ${t.nama_lokasi}` : ''}
+                        TPS {t.nomor_tps}
+                        {t.nama_lokasi
+                          ? ` - ${t.nama_lokasi}`
+                          : ''}
                       </option>
                     ))}
                   </select>
-                </div>
+                )}
+              </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">
                     NIK (opsional)
