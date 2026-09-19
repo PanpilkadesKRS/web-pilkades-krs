@@ -4580,7 +4580,17 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     };
   }, [dataRealCount]);
 
-  function bukaInputSuara(row: any) {
+  async function bukaInputSuara(row: any) {
+    const { count: jumlahDPT, error: errDPT } = await supabase
+      .from('penduduk')
+      .select('*', { count: 'exact', head: true })
+      .eq('status_dpt', 'DPT')
+      .eq('TPS', row.tps.nomor_tps);
+
+    if (errDPT) {
+      alert('Gagal mengambil jumlah DPT TPS: ' + errDPT.message);
+      return;
+    }
     const suaraAwal: Record<string, number> = {};
     row.suaraPerKandidat.forEach((sp: any) => {
       suaraAwal[sp.kandidat.id] = sp.jumlah;
@@ -4595,12 +4605,98 @@ const dataBelumDitentukanFiltered = useMemo(() => {
       tps_id: row.tps.id,
       tps_nomor: row.tps.nomor_tps,
       tps_nama: row.tps.nama_lokasi,
+      batas_dpt: jumlahDPT || 0,
       suara_sah: suaraSahOtomatis,
       suara_tidak_sah: row.rekap.suara_tidak_sah || 0,
       status: row.rekap.status || 'Belum Lapor',
       suara_per_kandidat: suaraAwal,
     });
   }
+
+      function totalSuaraInput() {
+      if (!modalInputSuara) return 0;
+
+      const suaraKandidat = Object.values(
+        modalInputSuara.suara_per_kandidat || {}
+      ).reduce(
+        (total: number, value: any) => total + (Number(value) || 0),
+        0
+      );
+
+      return suaraKandidat + (Number(modalInputSuara.suara_tidak_sah) || 0);
+    }
+
+    function ubahSuaraKandidat(kandidatId: string, nilaiBaru: any) {
+      if (!modalInputSuara) return;
+      const batasDPT = Number(modalInputSuara.batas_dpt) || 0;
+      const totalMasuk = totalSuaraInput();
+
+      if (totalMasuk > batasDPT) {
+        alert(
+          `Total suara tidak boleh melebihi DPT TPS ${modalInputSuara.tps_nomor}.\n\n` +
+          `DPT: ${batasDPT}\n` +
+          `Total Input: ${totalMasuk}`
+        );
+        return;
+      }
+
+      const batas = Number(modalInputSuara.batas_dpt) || 0;
+
+      const totalKandidatLain = Object.entries(
+        modalInputSuara.suara_per_kandidat || {}
+      )
+        .filter(([id]) => id !== kandidatId)
+        .reduce(
+          (total: number, [, value]: any) => total + (Number(value) || 0),
+          0
+        );
+
+      const suaraTidakSah =
+        Number(modalInputSuara.suara_tidak_sah) || 0;
+
+      const sisaMaksimal = Math.max(
+        0,
+        batas - totalKandidatLain - suaraTidakSah
+      );
+
+      const angkaBaru = Math.max(
+        0,
+        Math.floor(Number(nilaiBaru) || 0)
+      );
+
+      setModalInputSuara({
+        ...modalInputSuara,
+        suara_per_kandidat: {
+          ...modalInputSuara.suara_per_kandidat,
+          [kandidatId]: Math.min(angkaBaru, sisaMaksimal),
+        },
+      });
+    }
+
+    function ubahSuaraTidakSah(nilaiBaru: any) {
+      if (!modalInputSuara) return;
+
+      const batas = Number(modalInputSuara.batas_dpt) || 0;
+
+      const totalKandidat = Object.values(
+        modalInputSuara.suara_per_kandidat || {}
+      ).reduce(
+        (total: number, value: any) => total + (Number(value) || 0),
+        0
+      );
+
+      const sisaMaksimal = Math.max(0, batas - totalKandidat);
+
+      const angkaBaru = Math.max(
+        0,
+        Math.floor(Number(nilaiBaru) || 0)
+      );
+
+      setModalInputSuara({
+        ...modalInputSuara,
+        suara_tidak_sah: Math.min(angkaBaru, sisaMaksimal),
+      });
+    }
 
   async function simpanHasilSuara(e: React.FormEvent) {
     e.preventDefault();
@@ -7590,10 +7686,11 @@ async function cetakPlanoTPS(row: any) {
                       'Sedang Dihitung': 'bg-yellow-50 text-yellow-700 border-yellow-200',
                       'Sudah Final': 'bg-emerald-50 text-emerald-700 border-emerald-200',
                     };
-                    const totalSuaraTPS = row.suaraPerKandidat.reduce(
-                      (s: number, sp: any) => s + sp.jumlah,
+                   const totalSuaraTPS =
+                    row.suaraPerKandidat.reduce(
+                      (s: number, sp: any) => s + (Number(sp.jumlah) || 0),
                       0
-                    );
+                    ) + (Number(row.rekap.suara_tidak_sah) || 0);
 
                     return (
                       <div
@@ -7634,21 +7731,14 @@ async function cetakPlanoTPS(row: any) {
                         </div>
 
                         {(user.role === 'Super Admin' || user.role === 'Admin' || user.role === 'KPPS') && (
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-2 gap-2 items-stretch">
                             <button
                               onClick={() => bukaInputSuara(row)}
-                              className="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all"
+                              className="h-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all"
                             >
                               {row.rekap.status === 'Belum Lapor' ? 'Input Hasil' : 'Edit Hasil'}
                             </button>
-                            <div className="grid grid-cols-1 gap-2">
-                        <button
-                          onClick={() => bukaInputSuara(row)}
-                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all"
-                        >
-                          {row.rekap.status === 'Belum Lapor' ? 'Input Hasil' : 'Edit Hasil'}
-                        </button>
-
+                            <div className="grid grid-cols-1 gap-2 h-full">
                         <button
                           onClick={() => cetakC1TPS(row)}
                           className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition-all"
@@ -12969,6 +13059,18 @@ async function cetakPlanoTPS(row: any) {
                   <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">
                     Jumlah Suara per Kandidat
                   </p>
+                  <div className="flex justify-between items-center mb-4 text-xs font-bold">
+                  <span className="text-slate-500">
+                      DPT TPS: <b className="text-slate-800">{modalInputSuara.batas_dpt}</b>
+                    </span>
+
+                    <span className="text-emerald-700">
+                      Sisa: {Math.max(
+                        0,
+                        Number(modalInputSuara.batas_dpt || 0) - totalSuaraInput()
+                      )}
+                    </span>
+                  </div>
                   <div className="space-y-3">
                     {dataKandidat.map((k) => (
                       <div key={k.id} className="flex items-center gap-3">
@@ -12978,21 +13080,44 @@ async function cetakPlanoTPS(row: any) {
                         <span className="flex-1 text-sm font-bold text-slate-700">
                           {k.nama}
                         </span>
+                        <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            ubahSuaraKandidat(
+                              k.id,
+                              Number(modalInputSuara.suara_per_kandidat[k.id] || 0) - 1
+                            )
+                          }
+                          disabled={Number(modalInputSuara.suara_per_kandidat[k.id] || 0) <= 0}
+                          className="w-9 h-10 rounded-lg bg-slate-200 font-black text-lg disabled:opacity-40"
+                        >
+                          −
+                        </button>
+
                         <input
                           type="number"
                           min={0}
-                          value={modalInputSuara.suara_per_kandidat[k.id] || 0}
-                          onChange={(e) =>
-                            setModalInputSuara({
-                              ...modalInputSuara,
-                              suara_per_kandidat: {
-                                ...modalInputSuara.suara_per_kandidat,
-                                [k.id]: e.target.value,
-                              },
-                            })
-                          }
-                          className="w-24 p-2.5 border-2 border-slate-200 rounded-lg font-black text-sm text-center outline-none focus:border-emerald-500"
+                          max={modalInputSuara.batas_dpt}
+                          value={modalInputSuara.suara_per_kandidat[k.id] ?? 0}
+                          onChange={(e) => ubahSuaraKandidat(k.id, e.target.value)}
+                          className="w-20 p-2.5 border-2 border-slate-200 rounded-lg font-black text-sm text-center outline-none focus:border-emerald-500"
                         />
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            ubahSuaraKandidat(
+                              k.id,
+                              Number(modalInputSuara.suara_per_kandidat[k.id] || 0) + 1
+                            )
+                          }
+                          disabled={totalSuaraInput() >= Number(modalInputSuara.batas_dpt || 0)}
+                          className="w-9 h-10 rounded-lg bg-emerald-600 text-white font-black text-lg disabled:opacity-40"
+                        >
+                          +
+                        </button>
+                      </div>
                       </div>
                     ))}
                   </div>
@@ -13017,15 +13142,38 @@ async function cetakPlanoTPS(row: any) {
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       Suara Tidak Sah
                     </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={modalInputSuara.suara_tidak_sah}
-                      onChange={(e) =>
-                        setModalInputSuara({ ...modalInputSuara, suara_tidak_sah: e.target.value })
-                      }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
-                    />
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          ubahSuaraTidakSah(Number(modalInputSuara.suara_tidak_sah || 0) - 1)
+                        }
+                        disabled={Number(modalInputSuara.suara_tidak_sah || 0) <= 0}
+                        className="w-10 h-11 rounded-lg bg-slate-200 font-black text-lg disabled:opacity-40"
+                      >
+                        −
+                      </button>
+
+                      <input
+                        type="number"
+                        min={0}
+                        max={modalInputSuara.batas_dpt}
+                        value={modalInputSuara.suara_tidak_sah}
+                        onChange={(e) => ubahSuaraTidakSah(e.target.value)}
+                        className="flex-1 min-w-0 p-3 border-2 border-slate-200 rounded-xl font-black text-sm text-center outline-none focus:border-emerald-500"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          ubahSuaraTidakSah(Number(modalInputSuara.suara_tidak_sah || 0) + 1)
+                        }
+                        disabled={totalSuaraInput() >= Number(modalInputSuara.batas_dpt || 0)}
+                        className="w-10 h-11 rounded-lg bg-emerald-600 text-white font-black text-lg disabled:opacity-40"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
