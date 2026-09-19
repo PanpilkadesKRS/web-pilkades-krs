@@ -370,6 +370,7 @@ export default function Home() {
   const [loadingSaksi, setLoadingSaksi] = useState(false);
   const [modalSaksi, setModalSaksi] = useState<any | null>(null);
   const [loadingSimpanSaksi, setLoadingSimpanSaksi] = useState(false);
+  const [loadingTTDSaksi, setLoadingTTDSaksi] = useState(false);
   const [filterTPS_Saksi, setFilterTPS_Saksi] = useState('Semua');
 
   // --- STATE KPPS ---
@@ -377,6 +378,7 @@ export default function Home() {
   const [loadingAnggotaKPPS, setLoadingAnggotaKPPS] = useState(false);
   const [modalAnggotaKPPS, setModalAnggotaKPPS] = useState<any | null>(null);
   const [loadingSimpanAnggotaKPPS, setLoadingSimpanAnggotaKPPS] = useState(false);
+  const [loadingTTDKPPS, setLoadingTTDKPPS] = useState(false);
   const [filterTPS_KPPS, setFilterTPS_KPPS] = useState('Semua');
 
   // --- STATE HARI H ---
@@ -4507,8 +4509,9 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     tps_id: tpsId,
     no_hp: '',
     nik: '',
+    ttd_url: '',
   });
-}
+  }
 
   function bukaEditSaksi(item: any) {
     if (
@@ -4529,8 +4532,143 @@ const dataBelumDitentukanFiltered = useMemo(() => {
       tps_id: item.tps_id || '',
       no_hp: item.no_hp || '',
       nik: item.nik || '',
+      ttd_url: item.ttd_url || '',
     });
   }
+
+  async function handleUploadTTDSaksi(
+      e: React.ChangeEvent<HTMLInputElement>
+    ) {
+      const file = e.target.files?.[0];
+
+      if (!file) return;
+
+      // ==========================================
+      // HANYA JPG / JPEG / PNG
+      // ==========================================
+      const formatDiizinkan = [
+        'image/jpeg',
+        'image/jpg',
+        'image/png',
+      ];
+
+      if (!formatDiizinkan.includes(file.type.toLowerCase())) {
+        alert('Format tanda tangan harus JPG, JPEG, atau PNG.');
+        e.target.value = '';
+        return;
+      }
+
+      // ==========================================
+      // MAKSIMAL 5 MB
+      // ==========================================
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Ukuran file tanda tangan maksimal 5 MB.');
+        e.target.value = '';
+        return;
+      }
+
+      setLoadingTTDSaksi(true);
+
+      try {
+        const ekstensi =
+          file.name.split('.').pop()?.toLowerCase() || 'png';
+
+        // ==========================================
+        // KALAU EDIT:
+        // pakai ID saksi
+        //
+        // KALAU TAMBAH:
+        // pakai nama temporary
+        // ==========================================
+        const namaFile = modalSaksi?.id
+          ? `saksi-${modalSaksi.id}-${Date.now()}.${ekstensi}`
+          : `saksi-baru-${Date.now()}-${Math.random()
+              .toString(36)
+              .slice(2, 8)}.${ekstensi}`;
+
+        // ==========================================
+        // UPLOAD KE STORAGE
+        // ==========================================
+        const { error: uploadError } =
+          await supabase.storage
+            .from('ttd-kpps')
+            .upload(
+              namaFile,
+              file,
+              {
+                upsert: true,
+                cacheControl: '0',
+                contentType: file.type,
+              }
+            );
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        // ==========================================
+        // AMBIL PUBLIC URL
+        // ==========================================
+        const { data: publicUrlData } =
+          supabase.storage
+            .from('ttd-kpps')
+            .getPublicUrl(namaFile);
+
+        if (!publicUrlData?.publicUrl) {
+          throw new Error('URL tanda tangan gagal dibuat.');
+        }
+
+        const ttdUrl =
+          `${publicUrlData.publicUrl}?v=${Date.now()}`;
+
+        // ==========================================
+        // SIMPAN KE MODAL
+        //
+        // INI YANG MEMBUAT TAMBAH SAKSI
+        // BISA UPLOAD SEBELUM DATA DISIMPAN
+        // ==========================================
+        setModalSaksi((prev: any) => ({
+          ...prev,
+          ttd_url: ttdUrl,
+        }));
+
+        // ==========================================
+        // KALAU SUDAH ADA ID = MODE EDIT
+        // LANGSUNG UPDATE DATABASE JUGA
+        // ==========================================
+        if (modalSaksi?.id) {
+          const { error: updateError } =
+            await supabase
+              .from('saksi')
+              .update({
+                ttd_url: ttdUrl,
+              })
+              .eq('id', modalSaksi.id);
+
+          if (updateError) {
+            throw updateError;
+          }
+
+          await fetchSaksi();
+        }
+
+      } catch (err: any) {
+        console.error(
+          'Upload TTD Saksi:',
+          err
+        );
+
+        alert(
+          'Gagal upload tanda tangan saksi: ' +
+          (err?.message || 'Terjadi kesalahan.')
+        );
+      } finally {
+        setLoadingTTDSaksi(false);
+
+        // Biar file yang sama bisa dipilih ulang
+        e.target.value = '';
+      }
+    }
 
     async function simpanSaksi(e: React.FormEvent) {
     e.preventDefault();
@@ -4598,6 +4736,9 @@ const dataBelumDitentukanFiltered = useMemo(() => {
         tps_id: tpsIdFinal,
         no_hp: modalSaksi.no_hp || null,
         nik: modalSaksi.nik || null,
+
+        // TANDA TANGAN
+        ttd_url: modalSaksi.ttd_url || null,
       };
 
       let error;
@@ -4697,6 +4838,7 @@ const dataBelumDitentukanFiltered = useMemo(() => {
       jabatan: 'Ketua',
       no_hp: '',
       nik: '',
+      ttd_url: '',
     });
   }
 
@@ -4708,7 +4850,105 @@ const dataBelumDitentukanFiltered = useMemo(() => {
       jabatan: item.jabatan || 'Ketua',
       no_hp: item.no_hp || '',
       nik: item.nik || '',
+      ttd_url: item.ttd_url || '',
     });
+  }
+   
+  async function handleUploadTTDKPPS(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+
+    if (!file || !modalAnggotaKPPS?.id) return;
+
+    // HANYA JPG / JPEG / PNG
+    const formatDiizinkan = [
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+    ];
+
+    if (!formatDiizinkan.includes(file.type.toLowerCase())) {
+      alert('Format tanda tangan harus JPG, JPEG, atau PNG.');
+      e.target.value = '';
+      return;
+    }
+
+    // Maksimal 5 MB
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Ukuran file tanda tangan maksimal 5 MB.');
+      e.target.value = '';
+      return;
+    }
+
+    setLoadingTTDKPPS(true);
+
+    try {
+      // Ambil ekstensi file
+      const ekstensi =
+        file.name.split('.').pop()?.toLowerCase() || 'png';
+
+      // Nama file berdasarkan ID anggota KPPS
+      const namaFile =
+        `anggota-${modalAnggotaKPPS.id}.${ekstensi}`;
+
+      const { error: uploadError } =
+        await supabase.storage
+          .from('ttd-kpps')
+          .upload(
+            namaFile,
+            file,
+            {
+              upsert: true,
+              cacheControl: '0',
+            }
+          );
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: publicUrlData } =
+        supabase.storage
+          .from('ttd-kpps')
+          .getPublicUrl(namaFile);
+
+      // Tambah versi supaya browser tidak pakai cache TTD lama
+      const ttdUrl =
+        `${publicUrlData.publicUrl}?v=${Date.now()}`;
+
+      const { error: updateError } =
+        await supabase
+          .from('anggota_kpps')
+          .update({
+            ttd_url: ttdUrl,
+          })
+          .eq('id', modalAnggotaKPPS.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      setModalAnggotaKPPS((prev: any) => ({
+        ...prev,
+        ttd_url: ttdUrl,
+      }));
+
+      await fetchAnggotaKPPS();
+
+    } catch (err: any) {
+      console.error('Upload TTD KPPS:', err);
+
+      alert(
+        'Gagal upload tanda tangan: ' +
+        (err.message || 'Terjadi kesalahan.')
+      );
+    } finally {
+      setLoadingTTDKPPS(false);
+
+      // Supaya file yang sama bisa dipilih lagi
+      e.target.value = '';
+    }
   }
 
   async function simpanAnggotaKPPS(e: React.FormEvent) {
@@ -5487,16 +5727,51 @@ const dataBelumDitentukanFiltered = useMemo(() => {
       }).join('');
 
       const saksiCells = Array.from({ length: 5 }, (_, i) => {
-        const orang = saksi[i];
-        return `
-          <td class="signature-cell">
-            <div class="signature-role">SAKSI No.${i + 1}</div>
-            <div class="candidate-small">${escapeHTML(orang?.kandidat?.nama || '')}</div>
-            <div class="signature-space"></div>
-            <div class="signature-name">${escapeHTML(orang?.nama || '........................')}</div>
-          </td>
-        `;
-      }).join('');
+
+      const orang = saksi[i];
+
+      return `
+        <td class="signature-cell">
+
+          <div class="signature-role">
+            SAKSI No.${i + 1}
+          </div>
+
+          <div class="candidate-small">
+            ${escapeHTML(
+              orang?.kandidat?.nama || ''
+            )}
+          </div>
+
+          <div class="signature-space">
+
+            ${
+              orang?.ttd_url
+                ? `
+                    <img
+                      src="${escapeHTML(
+                        orang.ttd_url
+                      )}"
+                      class="signature-img"
+                      alt=""
+                    />
+                  `
+                : ''
+            }
+
+          </div>
+
+          <div class="signature-name">
+            ${escapeHTML(
+              orang?.nama ||
+              '........................'
+            )}
+          </div>
+
+        </td>
+      `;
+
+    }).join('');
 
       const desa = row.tps.desa || 'Karangsambung';
       const kecamatan = row.tps.kecamatan || 'Kedung Waringin';
@@ -5630,6 +5905,30 @@ const dataBelumDitentukanFiltered = useMemo(() => {
       margin-top: 2px;
     }
     .signature-space { height: 35px; }
+    .signature-space {
+      height:35px;
+      width:100%;
+
+      display:flex;
+      align-items:center;
+      justify-content:center;
+
+      overflow:hidden;
+      padding:1px 2px;
+    }
+
+    .signature-img {
+      display:block;
+
+      width:auto;
+      height:auto;
+
+      max-width:95%;
+      max-height:31px;
+
+      object-fit:contain;
+      object-position:center;
+    }
     .signature-name {
       font-size: 8px;
       font-weight: 700;
@@ -5933,40 +6232,119 @@ async function cetakPlanoTPS(row: any) {
     const kecamatan = row.tps.kecamatan || MASTER_LOKASI.kecamatan;
     const kabupaten = row.tps.kabupaten || MASTER_LOKASI.kabupaten;
 
-    const kpps = [...(kppsRes.data || [])].sort((a: any, b: any) => {
-      const aKetua = String(a.jabatan || '').toLowerCase().includes('ketua') ? 0 : 1;
-      const bKetua = String(b.jabatan || '').toLowerCase().includes('ketua') ? 0 : 1;
-      if (aKetua !== bKetua) return aKetua - bKetua;
-      return 0;
-    });
+        // ==========================================
+    // URUTAN KPPS UNTUK TANDA TANGAN PLANO
+    // ==========================================
+    const urutanJabatanKPPS = [
+      'Ketua',
+      'Anggota 1',
+      'Anggota 2',
+      'Anggota 3',
+      'Anggota 4',
+      'Anggota 5',
+      'Anggota 6',
+    ];
 
-    const saksi = [...(saksiRes.data || [])].sort(
-      (a: any, b: any) =>
-        Number(a.kandidat?.nomor_urut || 99) - Number(b.kandidat?.nomor_urut || 99)
+    const semuaKPPS = kppsRes.data || [];
+
+    // Cari berdasarkan jabatan, bukan urutan database
+    const kpps = urutanJabatanKPPS.map((jabatan) =>
+      semuaKPPS.find(
+        (orang: any) =>
+          String(orang?.jabatan || '').trim().toLowerCase() ===
+          jabatan.toLowerCase()
+      )
     );
 
+    // SAKSI TETAP
+    const saksi = [...(saksiRes.data || [])].sort(
+      (a: any, b: any) =>
+        Number(a.kandidat?.nomor_urut || 99) -
+        Number(b.kandidat?.nomor_urut || 99)
+    );
+
+    // ==========================================
+    // BUAT KOTAK TTD KPPS
+    // ==========================================
     const kppsCells = Array.from({ length: 7 }, (_, i) => {
       const orang = kpps[i];
+
       return `
         <td class="ttd-cell">
-          <div class="ttd-role">${i === 0 ? '1 KETUA' : `${i + 1} ANGGOTA`}</div>
-          <div class="ttd-space"></div>
-          <div class="ttd-name">${escapeHTML(orang?.nama || '....................')}</div>
+
+          <div class="ttd-role">
+            ${i === 0 ? '1 KETUA' : `${i + 1} ANGGOTA`}
+          </div>
+
+          <div class="ttd-space">
+            ${
+              orang?.ttd_url
+                ? `<img
+                    src="${escapeHTML(orang.ttd_url)}"
+                    class="ttd-img"
+                    alt=""
+                  />`
+                : ''
+            }
+          </div>
+
+          <div class="ttd-name">
+            ${escapeHTML(
+              orang?.nama || '....................'
+            )}
+          </div>
+
         </td>
       `;
     }).join('');
 
     const saksiCells = Array.from({ length: 5 }, (_, i) => {
-      const orang = saksi[i];
-      return `
-        <td class="ttd-cell">
-          <div class="ttd-role">SAKSI No.${i + 1}</div>
-          <div class="ttd-small">${escapeHTML(orang?.kandidat?.nama || 'Nama Calon')}</div>
-          <div class="ttd-space"></div>
-          <div class="ttd-name">${escapeHTML(orang?.nama || '....................')}</div>
-        </td>
-      `;
-    }).join('');
+
+    const orang = saksi[i];
+
+    return `
+      <td class="ttd-cell">
+
+        <div class="ttd-role">
+          SAKSI No.${i + 1}
+        </div>
+
+        <div class="ttd-small">
+          ${escapeHTML(
+            orang?.kandidat?.nama ||
+            'Nama Calon'
+          )}
+        </div>
+
+        <div class="ttd-space">
+
+          ${
+            orang?.ttd_url
+              ? `
+                  <img
+                    src="${escapeHTML(
+                      orang.ttd_url
+                    )}"
+                    class="ttd-img"
+                    alt=""
+                  />
+                `
+              : ''
+          }
+
+        </div>
+
+        <div class="ttd-name">
+          ${escapeHTML(
+            orang?.nama ||
+            '....................'
+          )}
+        </div>
+
+      </td>
+    `;
+
+  }).join('');
 
     const kandidatBlokHal2 = Array.from({ length: 5 }, (_, i) => {
       const sp = suaraPerKandidat[i];
@@ -6126,10 +6504,46 @@ async function cetakPlanoTPS(row: any) {
       padding:3px;
     }
     .ttd-saksi td { width:20%; }
-    .ttd-role { font-weight:800; font-size:9px; }
-    .ttd-small { font-size:8px; font-weight:700; min-height:18px; }
-    .ttd-space { height:34px; }
-    .ttd-name { font-size:8px; font-weight:700; }
+    .ttd-role {
+      font-weight:800;
+      font-size:9px;
+    }
+
+    .ttd-small {
+      font-size:8px;
+      font-weight:700;
+      min-height:18px;
+    }
+
+    .ttd-space {
+      width:100%;
+      height:34px;
+
+      display:flex;
+      align-items:center;
+      justify-content:center;
+
+      overflow:hidden;
+      padding:1px 2px;
+    }
+
+    .ttd-img {
+      display:block;
+
+      width:auto;
+      height:auto;
+
+      max-width:95%;
+      max-height:30px;
+
+      object-fit:contain;
+      object-position:center;
+    }
+
+    .ttd-name {
+      font-size:8px;
+      font-weight:700;
+    }
     .page-no {
       margin-top:8px;
       font-size:10px;
@@ -13520,6 +13934,91 @@ async function cetakPlanoTPS(row: any) {
                     className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
                   />
                 </div>
+                {/* ==========================================
+                        TANDA TANGAN SAKSI
+                    ========================================== */}
+
+                    {(
+
+                      <div className="border-t border-slate-200 pt-4">
+
+                        <label className="block text-xs font-bold text-slate-500 mb-2">
+                          Tanda Tangan Saksi
+                        </label>
+
+                        {/* PREVIEW */}
+                        <div className="
+                          w-full
+                          h-28
+                          bg-slate-50
+                          border-2
+                          border-dashed
+                          border-slate-300
+                          rounded-xl
+                          flex
+                          items-center
+                          justify-center
+                          overflow-hidden
+                          p-3
+                          mb-3
+                        ">
+
+                          {modalSaksi.ttd_url ? (
+
+                            <img
+                              src={modalSaksi.ttd_url}
+                              alt={`TTD ${modalSaksi.nama}`}
+                              className="max-w-full max-h-full object-contain"
+                            />
+
+                          ) : (
+
+                            <span className="text-xs font-bold text-slate-400">
+                              Belum ada tanda tangan
+                            </span>
+
+                          )}
+
+                        </div>
+
+
+                        {/* UPLOAD */}
+                        <label
+                          className={`inline-flex px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${
+                            loadingTTDSaksi
+                              ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}
+                        >
+
+                          {loadingTTDSaksi
+                            ? 'Mengupload...'
+                            : modalSaksi.ttd_url
+                            ? 'Ganti TTD'
+                            : 'Upload TTD'
+                          }
+
+                          <input
+                            type="file"
+                            accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                            onChange={handleUploadTTDSaksi}
+                            disabled={loadingTTDSaksi}
+                            className="hidden"
+                          />
+
+                        </label>
+
+                        <p className="text-[10px] font-bold text-slate-400 mt-2">
+                          Format JPG, JPEG, atau PNG. Maksimal 5 MB.
+                        </p>
+
+                        <p className="text-[10px] font-bold text-slate-400">
+                          Tanda tangan otomatis ditampilkan pada dokumen C1 dan Plano.
+                        </p>
+
+                      </div>
+
+                    )}
               </div>
 
               <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
@@ -13633,6 +14132,63 @@ async function cetakPlanoTPS(row: any) {
                     className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-500"
                   />
                 </div>
+                {/* TANDA TANGAN KPPS */}
+                  {modalAnggotaKPPS.id &&
+                  !String(modalAnggotaKPPS.jabatan || '')
+                    .toLowerCase()
+                    .includes('linmas') && (
+                    <div className="border-t border-slate-200 pt-4">
+
+                      <label className="block text-xs font-bold text-slate-500 mb-2">
+                        Tanda Tangan
+                      </label>
+
+                      {/* PREVIEW TTD */}
+                      <div className="w-full h-28 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center overflow-hidden p-3 mb-3">
+
+                        {modalAnggotaKPPS.ttd_url ? (
+                          <img
+                            src={modalAnggotaKPPS.ttd_url}
+                            alt={`TTD ${modalAnggotaKPPS.nama}`}
+                            className="max-w-full max-h-full object-contain"
+                          />
+                        ) : (
+                          <span className="text-xs font-bold text-slate-400">
+                            Belum ada tanda tangan
+                          </span>
+                        )}
+
+                      </div>
+
+                      {/* TOMBOL UPLOAD */}
+                      <label
+                        className={`inline-flex px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${
+                          loadingTTDKPPS
+                            ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                            : 'bg-teal-600 hover:bg-teal-700 text-white'
+                        }`}
+                      >
+                        {loadingTTDKPPS
+                          ? 'Mengupload...'
+                          : modalAnggotaKPPS.ttd_url
+                          ? 'Ganti TTD'
+                          : 'Upload TTD'}
+
+                        <input
+                          type="file"
+                          accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                          onChange={handleUploadTTDKPPS}
+                          disabled={loadingTTDKPPS}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <p className="text-[10px] font-bold text-slate-400 mt-2">
+                        Format JPG, JPEG, atau PNG. Maksimal 5 MB.
+                      </p>
+
+                    </div>
+                  )}
               </div>
 
               <div className="bg-slate-50 p-5 border-t border-slate-200 flex justify-end gap-3">
