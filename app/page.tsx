@@ -4514,16 +4514,6 @@ const dataBelumDitentukanFiltered = useMemo(() => {
   }
 
   function bukaEditSaksi(item: any) {
-    if (
-      user?.role === 'KPPS' &&
-      String(item?.tps?.nomor_tps || '') !==
-        String(user?.tps_assigned || '')
-    ) {
-      alert(
-        `Akses ditolak. Akun ini hanya boleh mengelola saksi TPS ${user.tps_assigned}.`
-      );
-      return;
-    }
 
     setModalSaksi({
       id: item.id,
@@ -4534,7 +4524,33 @@ const dataBelumDitentukanFiltered = useMemo(() => {
       nik: item.nik || '',
       ttd_url: item.ttd_url || '',
     });
+
   }
+
+  function ambilPathTTDStorage(url: string) {
+  if (!url) return null;
+
+  try {
+    const urlBersih = url.split('?')[0];
+
+    const penanda = '/ttd-kpps/';
+
+    const posisi = urlBersih.indexOf(penanda);
+
+    if (posisi === -1) {
+      return null;
+    }
+
+    const path = urlBersih.substring(
+      posisi + penanda.length
+    );
+
+    return decodeURIComponent(path);
+
+  } catch {
+    return null;
+  }
+}
 
   async function handleUploadTTDSaksi(
       e: React.ChangeEvent<HTMLInputElement>
@@ -4669,6 +4685,101 @@ const dataBelumDitentukanFiltered = useMemo(() => {
         e.target.value = '';
       }
     }
+
+    async function hapusTTDSaksi() {
+  if (!modalSaksi?.ttd_url) {
+    return;
+  }
+
+  const yakin = confirm(
+    `Hapus tanda tangan ${modalSaksi.nama || 'saksi ini'}?`
+  );
+
+  if (!yakin) return;
+
+  setLoadingTTDSaksi(true);
+
+  try {
+    // ==========================================
+    // 1. AMBIL PATH FILE DARI URL
+    // ==========================================
+    const pathFile =
+      ambilPathTTDStorage(
+        modalSaksi.ttd_url
+      );
+
+    // ==========================================
+    // 2. HAPUS FILE DARI STORAGE
+    // ==========================================
+    if (pathFile) {
+      const { error: storageError } =
+        await supabase.storage
+          .from('ttd-kpps')
+          .remove([
+            pathFile
+          ]);
+
+      if (storageError) {
+        console.warn(
+          'File TTD saksi gagal dihapus dari storage:',
+          storageError
+        );
+      }
+    }
+
+    // ==========================================
+    // 3. KALAU DATA SAKSI SUDAH TERSIMPAN,
+    // KOSONGKAN URL DI DATABASE
+    // ==========================================
+    if (modalSaksi.id) {
+      const { error: updateError } =
+        await supabase
+          .from('saksi')
+          .update({
+            ttd_url: null,
+          })
+          .eq(
+            'id',
+            modalSaksi.id
+          );
+
+      if (updateError) {
+        throw updateError;
+      }
+    }
+
+    // ==========================================
+    // 4. HILANGKAN PREVIEW DI MODAL
+    // ==========================================
+    setModalSaksi(
+      (prev: any) => ({
+        ...prev,
+        ttd_url: '',
+      })
+    );
+
+    if (modalSaksi.id) {
+      await fetchSaksi();
+    }
+
+  } catch (err: any) {
+
+    console.error(
+      'Hapus TTD Saksi:',
+      err
+    );
+
+    alert(
+      'Gagal menghapus tanda tangan saksi: ' +
+      (err?.message || 'Terjadi kesalahan.')
+    );
+
+  } finally {
+
+    setLoadingTTDSaksi(false);
+
+  }
+}
 
     async function simpanSaksi(e: React.FormEvent) {
     e.preventDefault();
@@ -4810,31 +4921,143 @@ const dataBelumDitentukanFiltered = useMemo(() => {
   // FUNGSI ANGGOTA KPPS
   // ==========================================
   async function fetchAnggotaKPPS() {
-    setLoadingAnggotaKPPS(true);
+      setLoadingAnggotaKPPS(true);
 
-    const { data, error } = await supabase
-      .from('anggota_kpps')
-      .select('*, tps:tps_id(nomor_tps, nama_lokasi)')
-      .order('created_at', { ascending: false });
+      try {
+        let query = supabase
+          .from('anggota_kpps')
+          .select('*, tps:tps_id(nomor_tps, nama_lokasi)')
+          .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error Supabase (Anggota KPPS):', error);
-      alert('Error saat mengambil data anggota KPPS: ' + error.message);
-    } else {
-      setDataAnggotaKPPS(data || []);
+        // ==========================================
+        // AKUN KPPS HANYA BOLEH MELIHAT TPS SENDIRI
+        // ==========================================
+        if (user?.role === 'KPPS') {
+
+          if (!user?.tps_assigned) {
+            setDataAnggotaKPPS([]);
+            setLoadingAnggotaKPPS(false);
+            return;
+          }
+
+          const { data: tpsAkun, error: errorTPS } =
+            await supabase
+              .from('tps')
+              .select('id, nomor_tps')
+              .eq('nomor_tps', user.tps_assigned)
+              .single();
+
+          if (errorTPS || !tpsAkun) {
+            throw new Error(
+              `TPS ${user.tps_assigned} tidak ditemukan.`
+            );
+          }
+
+          query = query.eq(
+            'tps_id',
+            tpsAkun.id
+          );
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          throw error;
+        }
+
+        setDataAnggotaKPPS(data || []);
+
+      } catch (err: any) {
+
+        console.error(
+          'Error Supabase (Anggota KPPS):',
+          err
+        );
+
+        alert(
+          'Error saat mengambil data anggota KPPS: ' +
+          err.message
+        );
+
+        setDataAnggotaKPPS([]);
+
+      } finally {
+
+        setLoadingAnggotaKPPS(false);
+
+      }
     }
-    setLoadingAnggotaKPPS(false);
-  }
-
+   
+        // ==========================================
+  // FILTER DATA ANGGOTA KPPS
+  // ==========================================
   const dataAnggotaKPPSFiltered = useMemo(() => {
-    if (filterTPS_KPPS === 'Semua') return dataAnggotaKPPS;
-    return dataAnggotaKPPS.filter((a) => a.tps?.nomor_tps === filterTPS_KPPS);
-  }, [dataAnggotaKPPS, filterTPS_KPPS]);
 
-  function bukaTambahAnggotaKPPS() {
+    // Akun KPPS datanya sudah dikunci dari query
+    if (user?.role === 'KPPS') {
+      return dataAnggotaKPPS;
+    }
+
+    // Admin / Super Admin
+    if (filterTPS_KPPS === 'Semua') {
+      return dataAnggotaKPPS;
+    }
+
+    return dataAnggotaKPPS.filter(
+      (a) =>
+        String(a.tps?.nomor_tps || '') ===
+        String(filterTPS_KPPS)
+    );
+
+  }, [
+    dataAnggotaKPPS,
+    filterTPS_KPPS,
+    user?.role,
+  ]);
+
+
+  // ==========================================
+  // TAMBAH ANGGOTA KPPS
+  // ==========================================
+  async function bukaTambahAnggotaKPPS() {
+
+    let tpsId = '';
+
+    // ==========================================
+    // KPPS OTOMATIS TPS SENDIRI
+    // ==========================================
+    if (user?.role === 'KPPS') {
+
+      if (!user?.tps_assigned) {
+        alert(
+          'Akun KPPS ini belum memiliki TPS penugasan.'
+        );
+        return;
+      }
+
+      const { data: tpsAkun, error: errorTPS } =
+        await supabase
+          .from('tps')
+          .select('id, nomor_tps')
+          .eq(
+            'nomor_tps',
+            user.tps_assigned
+          )
+          .single();
+
+      if (errorTPS || !tpsAkun) {
+        alert(
+          `TPS ${user.tps_assigned} tidak ditemukan di master TPS.`
+        );
+        return;
+      }
+
+      tpsId = tpsAkun.id;
+    }
+
     setModalAnggotaKPPS({
       nama: '',
-      tps_id: '',
+      tps_id: tpsId,
       jabatan: 'Ketua',
       no_hp: '',
       nik: '',
@@ -4842,18 +5065,61 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     });
   }
 
-  function bukaEditAnggotaKPPS(item: any) {
-    setModalAnggotaKPPS({
-      id: item.id,
-      nama: item.nama,
-      tps_id: item.tps_id || '',
-      jabatan: item.jabatan || 'Ketua',
-      no_hp: item.no_hp || '',
-      nik: item.nik || '',
-      ttd_url: item.ttd_url || '',
-    });
-  }
-   
+
+    // ==========================================
+    // EDIT ANGGOTA KPPS
+    // ==========================================
+    function bukaEditAnggotaKPPS(item: any) {
+
+      // ==========================================
+      // PENGAMAN:
+      // KPPS HANYA BOLEH EDIT TPS SENDIRI
+      // ==========================================
+      if (user?.role === 'KPPS') {
+
+        const tpsAkun =
+          String(
+            user?.tps_assigned || ''
+          )
+            .trim()
+            .padStart(2, '0');
+
+        const tpsData =
+          String(
+            item?.tps?.nomor_tps || ''
+          )
+            .trim()
+            .padStart(2, '0');
+
+        if (
+          !tpsAkun ||
+          tpsData !== tpsAkun
+        ) {
+          alert(
+            `Akses ditolak. Akun ini hanya boleh mengelola anggota KPPS TPS ${
+              user?.tps_assigned || '-'
+            }.`
+          );
+
+          return;
+        }
+      }
+
+      setModalAnggotaKPPS({
+        id: item.id,
+        nama: item.nama,
+        tps_id: item.tps_id || '',
+        jabatan:
+          item.jabatan || 'Ketua',
+        no_hp:
+          item.no_hp || '',
+        nik:
+          item.nik || '',
+        ttd_url:
+          item.ttd_url || '',
+      });
+    }
+
   async function handleUploadTTDKPPS(
     e: React.ChangeEvent<HTMLInputElement>
   ) {
@@ -4951,41 +5217,251 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     }
   }
 
-  async function simpanAnggotaKPPS(e: React.FormEvent) {
-    e.preventDefault();
-    if (!modalAnggotaKPPS) return;
-
-    setLoadingSimpanAnggotaKPPS(true);
-
-    const payload: any = {
-      nama: modalAnggotaKPPS.nama,
-      tps_id: modalAnggotaKPPS.tps_id || null,
-      jabatan: modalAnggotaKPPS.jabatan || null,
-      no_hp: modalAnggotaKPPS.no_hp || null,
-      nik: modalAnggotaKPPS.nik || null,
-    };
-
-    let error;
-    if (modalAnggotaKPPS.id) {
-      const res = await supabase
-        .from('anggota_kpps')
-        .update(payload)
-        .eq('id', modalAnggotaKPPS.id);
-      error = res.error;
-    } else {
-      const res = await supabase.from('anggota_kpps').insert(payload);
-      error = res.error;
-    }
-
-    setLoadingSimpanAnggotaKPPS(false);
-
-    if (error) {
-      alert('Gagal menyimpan anggota KPPS: ' + error.message);
-    } else {
-      setModalAnggotaKPPS(null);
-      fetchAnggotaKPPS();
-    }
+    async function hapusTTDKPPS() {
+  if (!modalAnggotaKPPS?.ttd_url) {
+    return;
   }
+
+  const yakin = confirm(
+    `Hapus tanda tangan ${modalAnggotaKPPS.nama || 'anggota KPPS ini'}?`
+  );
+
+  if (!yakin) return;
+
+  setLoadingTTDKPPS(true);
+
+  try {
+    // ==========================================
+    // 1. AMBIL PATH FILE
+    // ==========================================
+    const pathFile =
+      ambilPathTTDStorage(
+        modalAnggotaKPPS.ttd_url
+      );
+
+    // ==========================================
+    // 2. HAPUS DARI STORAGE
+    // ==========================================
+    if (pathFile) {
+      const { error: storageError } =
+        await supabase.storage
+          .from('ttd-kpps')
+          .remove([
+            pathFile
+          ]);
+
+      if (storageError) {
+        console.warn(
+          'File TTD KPPS gagal dihapus dari storage:',
+          storageError
+        );
+      }
+    }
+
+    // ==========================================
+    // 3. KOSONGKAN DATABASE
+    // ==========================================
+    const { error: updateError } =
+      await supabase
+        .from('anggota_kpps')
+        .update({
+          ttd_url: null,
+        })
+        .eq(
+          'id',
+          modalAnggotaKPPS.id
+        );
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    // ==========================================
+    // 4. HILANGKAN PREVIEW
+    // ==========================================
+    setModalAnggotaKPPS(
+      (prev: any) => ({
+        ...prev,
+        ttd_url: '',
+      })
+    );
+
+    await fetchAnggotaKPPS();
+
+  } catch (err: any) {
+
+    console.error(
+      'Hapus TTD KPPS:',
+      err
+    );
+
+    alert(
+      'Gagal menghapus tanda tangan KPPS: ' +
+      (err?.message || 'Terjadi kesalahan.')
+    );
+
+  } finally {
+
+    setLoadingTTDKPPS(false);
+
+  }
+}
+
+  async function simpanAnggotaKPPS(
+      e: React.FormEvent
+    ) {
+      e.preventDefault();
+
+      if (!modalAnggotaKPPS) return;
+
+      setLoadingSimpanAnggotaKPPS(true);
+
+      try {
+
+        let tpsIdFinal =
+          modalAnggotaKPPS.tps_id;
+
+        // ==========================================
+        // KPPS WAJIB TPS SENDIRI
+        // ==========================================
+        if (user?.role === 'KPPS') {
+
+          if (!user?.tps_assigned) {
+            throw new Error(
+              'Akun KPPS belum memiliki TPS penugasan.'
+            );
+          }
+
+          const {
+            data: tpsAkun,
+            error: errorTPS,
+          } = await supabase
+            .from('tps')
+            .select('id, nomor_tps')
+            .eq(
+              'nomor_tps',
+              user.tps_assigned
+            )
+            .single();
+
+          if (
+            errorTPS ||
+            !tpsAkun
+          ) {
+            throw new Error(
+              `TPS ${user.tps_assigned} tidak ditemukan.`
+            );
+          }
+
+          // Paksa TPS akun
+          tpsIdFinal =
+            tpsAkun.id;
+        }
+
+
+        const payload: any = {
+          nama:
+            modalAnggotaKPPS.nama,
+
+          tps_id:
+            tpsIdFinal || null,
+
+          jabatan:
+            modalAnggotaKPPS.jabatan || null,
+
+          no_hp:
+            modalAnggotaKPPS.no_hp || null,
+
+          nik:
+            modalAnggotaKPPS.nik || null,
+        };
+
+
+        // ==========================================
+        // EDIT
+        // ==========================================
+        if (modalAnggotaKPPS.id) {
+
+          let query = supabase
+            .from('anggota_kpps')
+            .update(payload)
+            .eq(
+              'id',
+              modalAnggotaKPPS.id
+            );
+
+          // Pengaman kedua
+          if (user?.role === 'KPPS') {
+            query = query.eq(
+              'tps_id',
+              tpsIdFinal
+            );
+          }
+
+          const {
+            data,
+            error,
+          } =
+            await query.select('id');
+
+          if (error) {
+            throw error;
+          }
+
+          if (
+            user?.role === 'KPPS' &&
+            (!data ||
+              data.length === 0)
+          ) {
+            throw new Error(
+              'Akses ditolak. Data anggota bukan bagian dari TPS akun ini.'
+            );
+          }
+
+        }
+
+        // ==========================================
+        // TAMBAH
+        // ==========================================
+        else {
+
+          const {
+            error,
+          } =
+            await supabase
+              .from('anggota_kpps')
+              .insert(payload);
+
+          if (error) {
+            throw error;
+          }
+
+        }
+
+
+        setModalAnggotaKPPS(null);
+
+        await fetchAnggotaKPPS();
+
+      } catch (err: any) {
+
+        console.error(
+          'Simpan Anggota KPPS:',
+          err
+        );
+
+        alert(
+          'Gagal menyimpan anggota KPPS: ' +
+          (err?.message ||
+            'Terjadi kesalahan.')
+        );
+
+      } finally {
+
+        setLoadingSimpanAnggotaKPPS(false);
+
+      }
+    }
 
   async function hapusAnggotaKPPS(item: any) {
     if (!confirm(`Yakin ingin menghapus ${item.nama} dari daftar KPPS?`)) return;
@@ -8587,29 +9063,46 @@ async function cetakPlanoTPS(row: any) {
               </div>
 
               <div className="flex flex-wrap gap-2 mb-6">
-                <button
-                  onClick={() => setFilterTPS_KPPS('Semua')}
-                  className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
-                    filterTPS_KPPS === 'Semua'
-                      ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
-                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                  }`}
-                >
-                  Semua TPS
-                </button>
-                {dataTPSMaster.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => setFilterTPS_KPPS(t.nomor_tps)}
-                    className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
-                      filterTPS_KPPS === t.nomor_tps
-                        ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
-                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                    }`}
-                  >
-                    TPS {t.nomor_tps}
-                  </button>
-                ))}
+
+                {user?.role === 'KPPS' ? (
+
+                  <div className="px-4 py-2 bg-indigo-50 border-2 border-indigo-200 text-indigo-700 rounded-full text-xs font-black uppercase tracking-wide">
+                    TPS Penugasan: {user.tps_assigned || '-'}
+                  </div>
+
+                ) : (
+
+                  <>
+                    <button
+                      onClick={() => setFilterTPS_KPPS('Semua')}
+                      className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
+                        filterTPS_KPPS === 'Semua'
+                          ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      Semua TPS
+                    </button>
+
+                    {dataTPSMaster.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() =>
+                          setFilterTPS_KPPS(t.nomor_tps)
+                        }
+                        className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-wide border-2 transition-all ${
+                          filterTPS_KPPS === t.nomor_tps
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                            : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                        }`}
+                      >
+                        TPS {t.nomor_tps}
+                      </button>
+                    ))}
+                  </>
+
+                )}
+
               </div>
 
               {loadingAnggotaKPPS ? (
@@ -8643,22 +9136,32 @@ async function cetakPlanoTPS(row: any) {
                       <p className="text-xs font-bold text-slate-400">
                         {item.no_hp || 'No HP belum diisi'}
                       </p>
-                      {(user.role === 'Super Admin' || user.role === 'Admin') && (
-                        <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
-                          <button
-                            onClick={() => bukaEditAnggotaKPPS(item)}
-                            className="flex-1 py-2 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-lg transition-colors border border-slate-200"
-                          >
-                            Edit
-                          </button>
+                     {(
+                      user.role === 'Super Admin' ||
+                      user.role === 'Admin' ||
+                      user.role === 'KPPS'
+                    ) && (
+                      <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
+
+                        <button
+                          onClick={() => bukaEditAnggotaKPPS(item)}
+                          className="flex-1 py-2 bg-slate-50 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-lg transition-colors border border-slate-200"
+                        >
+                          Edit
+                        </button>
+
+                        {/* HAPUS TETAP KHUSUS ADMIN */}
+                        {(user.role === 'Super Admin' || user.role === 'Admin') && (
                           <button
                             onClick={() => hapusAnggotaKPPS(item)}
                             className="px-4 py-2 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 font-bold text-xs rounded-lg transition-colors border border-red-100"
                           >
                             Hapus
                           </button>
-                        </div>
-                      )}
+                        )}
+
+                      </div>
+                    )}
                     </div>
                   ))}
                 </div>
@@ -13883,26 +14386,32 @@ async function cetakPlanoTPS(row: any) {
                 </label>
 
                 {user?.role === 'KPPS' ? (
+
                   <div className="w-full p-3 border-2 border-indigo-200 bg-indigo-50 text-indigo-700 rounded-xl font-black text-sm">
                     TPS {user.tps_assigned || '-'}
                   </div>
+
                 ) : (
+
                   <select
-                    value={modalSaksi.tps_id}
+                    value={modalAnggotaKPPS.tps_id}
                     onChange={(e) =>
-                      setModalSaksi({
-                        ...modalSaksi,
+                      setModalAnggotaKPPS({
+                        ...modalAnggotaKPPS,
                         tps_id: e.target.value,
                       })
                     }
-                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-500 cursor-pointer"
                   >
                     <option value="">
                       -- Pilih TPS --
                     </option>
 
                     {dataTPSMaster.map((t) => (
-                      <option key={t.id} value={t.id}>
+                      <option
+                        key={t.id}
+                        value={t.id}
+                      >
                         TPS {t.nomor_tps}
                         {t.nama_lokasi
                           ? ` - ${t.nama_lokasi}`
@@ -13910,7 +14419,9 @@ async function cetakPlanoTPS(row: any) {
                       </option>
                     ))}
                   </select>
+
                 )}
+
               </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">
@@ -13982,31 +14493,7 @@ async function cetakPlanoTPS(row: any) {
                         </div>
 
 
-                        {/* UPLOAD */}
-                        <label
-                          className={`inline-flex px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${
-                            loadingTTDSaksi
-                              ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                          }`}
-                        >
-
-                          {loadingTTDSaksi
-                            ? 'Mengupload...'
-                            : modalSaksi.ttd_url
-                            ? 'Ganti TTD'
-                            : 'Upload TTD'
-                          }
-
-                          <input
-                            type="file"
-                            accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                            onChange={handleUploadTTDSaksi}
-                            disabled={loadingTTDSaksi}
-                            className="hidden"
-                          />
-
-                        </label>
+                       {/* UPLOAD */}
 
                         <p className="text-[10px] font-bold text-slate-400 mt-2">
                           Format JPG, JPEG, atau PNG. Maksimal 5 MB.
@@ -14160,28 +14647,64 @@ async function cetakPlanoTPS(row: any) {
 
                       </div>
 
-                      {/* TOMBOL UPLOAD */}
-                      <label
-                        className={`inline-flex px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${
-                          loadingTTDKPPS
-                            ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                            : 'bg-teal-600 hover:bg-teal-700 text-white'
-                        }`}
-                      >
-                        {loadingTTDKPPS
-                          ? 'Mengupload...'
-                          : modalAnggotaKPPS.ttd_url
-                          ? 'Ganti TTD'
-                          : 'Upload TTD'}
+                      {/* TOMBOL TTD */}
+<div className="flex flex-wrap gap-2">
 
-                        <input
-                          type="file"
-                          accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                          onChange={handleUploadTTDKPPS}
-                          disabled={loadingTTDKPPS}
-                          className="hidden"
-                        />
-                      </label>
+  {/* UPLOAD / GANTI */}
+  <label
+    className={`inline-flex px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${
+      loadingTTDKPPS
+        ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+        : 'bg-teal-600 hover:bg-teal-700 text-white'
+    }`}
+  >
+
+    {loadingTTDKPPS
+      ? 'Memproses...'
+      : modalAnggotaKPPS.ttd_url
+      ? 'Ganti TTD'
+      : 'Upload TTD'
+    }
+
+    <input
+      type="file"
+      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+      onChange={handleUploadTTDKPPS}
+      disabled={loadingTTDKPPS}
+      className="hidden"
+    />
+
+  </label>
+
+  {/* HAPUS TTD */}
+  {modalAnggotaKPPS.ttd_url && (
+
+    <button
+      type="button"
+      onClick={hapusTTDKPPS}
+      disabled={loadingTTDKPPS}
+      className="
+        inline-flex
+        px-4
+        py-2.5
+        bg-red-50
+        hover:bg-red-100
+        border
+        border-red-200
+        text-red-600
+        rounded-xl
+        text-xs
+        font-bold
+        transition-all
+        disabled:opacity-50
+      "
+    >
+      Hapus TTD
+    </button>
+
+  )}
+
+</div>
 
                       <p className="text-[10px] font-bold text-slate-400 mt-2">
                         Format JPG, JPEG, atau PNG. Maksimal 5 MB.
