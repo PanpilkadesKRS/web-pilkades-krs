@@ -3295,10 +3295,20 @@ async function simpanEditPemilihBaru(e: React.FormEvent) {
 
   async function handleLogout() {
     await supabase.auth.signOut();
+
+    setActiveMenu('');
+    setDataHariH([]);
+    setRekapKehadiranTPS([]);
+    setDataRealCount([]);
+    setModalInputSuara(null);
+    setFilterTPS_HariH('Semua');
+    setSearchHariH('');
+
     setUser(null);
     setUsername('');
     setPassword('');
     setRememberMe(false);
+
     localStorage.removeItem('sesiPetugasPilkades');
   }
 
@@ -3334,7 +3344,7 @@ async function simpanEditPemilihBaru(e: React.FormEvent) {
     setLoadingAkun(false);
   }
 
-  function tambahAkunBaru() {
+    function tambahAkunBaru() {
     setModalAkun({
       username: '',
       password: '',
@@ -3343,6 +3353,7 @@ async function simpanEditPemilihBaru(e: React.FormEvent) {
       akses_menu: [],
       rt_assigned: '001',
       rw_assigned: '001',
+      tps_assigned: null,
     });
   }
 
@@ -3361,53 +3372,82 @@ async function simpanEditPemilihBaru(e: React.FormEvent) {
   }
 
   async function simpanAkun(e: React.FormEvent) {
-    e.preventDefault();
-    if (!modalAkun) return;
+  e.preventDefault();
+  if (!modalAkun) return;
 
-    setLoadingSimpan(true);
+  setLoadingSimpan(true);
 
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-      if (!session) {
-        throw new Error('Sesi admin sudah habis. Silakan login ulang.');
-      }
-
-      const response = await fetch('/api/admin-akun', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: modalAkun.id ? 'update' : 'create',
-          akun: modalAkun,
-        }),
-      });
-
-      const hasil = await response.json();
-
-      if (!response.ok) {
-        throw new Error(hasil.error || 'Gagal menyimpan akun');
-      }
-
-      alert(
-        modalAkun.id
-          ? 'Akun berhasil diperbarui.'
-          : 'Akun berhasil dibuat dan sudah bisa digunakan untuk login.'
-      );
-
-      setModalAkun(null);
-      await fetchDaftarAkun();
-    } catch (err: any) {
-      console.error(err);
-      alert('Gagal menyimpan akun: ' + err.message);
-    } finally {
-      setLoadingSimpan(false);
+    if (!session) {
+      throw new Error('Sesi admin sudah habis. Silakan login ulang.');
     }
+
+    // ==========================================
+    // ATUR PENUGASAN BERDASARKAN ROLE
+    // ==========================================
+    const akunUntukDisimpan = {
+      ...modalAkun,
+    };
+
+    // PETUGAS COKLIT = pakai RT & RW
+    if (akunUntukDisimpan.role === 'Petugas Coklit') {
+      akunUntukDisimpan.tps_assigned = null;
+    }
+
+    // KPPS = pakai TPS, bukan RT/RW
+    else if (akunUntukDisimpan.role === 'KPPS') {
+      akunUntukDisimpan.rt_assigned = null;
+      akunUntukDisimpan.rw_assigned = null;
+
+      if (!akunUntukDisimpan.tps_assigned) {
+        throw new Error('TPS penugasan wajib dipilih untuk akun KPPS.');
+      }
+    }
+
+    // ADMIN / SUPER ADMIN = tidak dibatasi wilayah
+    else {
+      akunUntukDisimpan.rt_assigned = null;
+      akunUntukDisimpan.rw_assigned = null;
+      akunUntukDisimpan.tps_assigned = null;
+    }
+
+    const response = await fetch('/api/admin-akun', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        action: modalAkun.id ? 'update' : 'create',
+        akun: akunUntukDisimpan,
+      }),
+    });
+
+    const hasil = await response.json();
+
+    if (!response.ok) {
+      throw new Error(hasil.error || 'Gagal menyimpan akun');
+    }
+
+    alert(
+      modalAkun.id
+        ? 'Akun berhasil diperbarui.'
+        : 'Akun berhasil dibuat dan sudah bisa digunakan untuk login.'
+    );
+
+    setModalAkun(null);
+    await fetchDaftarAkun();
+  } catch (err: any) {
+    console.error(err);
+    alert('Gagal menyimpan akun: ' + err.message);
+  } finally {
+    setLoadingSimpan(false);
   }
+}
 
   // ==========================================
 // FUNGSI AKTIVITAS LOGIN
@@ -4575,44 +4615,183 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     setLoadingRealCount(true);
 
     try {
-      const [tpsRes, kandidatRes, suaraRes, rekapRes] = await Promise.all([
-        supabase.from('tps').select('*').order('nomor_tps', { ascending: true }),
-        supabase.from('kandidat').select('*').order('nomor_urut', { ascending: true }),
-        supabase.from('hasil_suara').select('*'),
-        supabase.from('rekap_suara_tps').select('*'),
+      const isAdmin =
+        user?.role === 'Super Admin' ||
+        user?.role === 'Admin';
+
+      // Selain Admin/Super Admin/KPPS tidak dapat data Real Count
+      if (
+        user?.role !== 'KPPS' &&
+        !isAdmin
+      ) {
+        setDataRealCount([]);
+        return;
+      }
+
+      // KPPS wajib punya TPS
+      if (
+        user?.role === 'KPPS' &&
+        !user?.tps_assigned
+      ) {
+        setDataRealCount([]);
+
+        alert(
+          'Akun KPPS ini belum memiliki TPS penugasan. Hubungi admin.'
+        );
+
+        return;
+      }
+
+      // =====================================================
+      // AMBIL TPS
+      // =====================================================
+      let queryTPS = supabase
+        .from('tps')
+        .select('*')
+        .order(
+          'nomor_tps',
+          { ascending: true }
+        );
+
+      // KPPS HANYA TPS SENDIRI
+      if (user?.role === 'KPPS') {
+        queryTPS = queryTPS.eq(
+          'nomor_tps',
+          user.tps_assigned
+        );
+      }
+
+      const [
+        tpsRes,
+        kandidatRes,
+      ] = await Promise.all([
+        queryTPS,
+
+        supabase
+          .from('kandidat')
+          .select('*')
+          .order(
+            'nomor_urut',
+            { ascending: true }
+          ),
       ]);
 
-      if (tpsRes.error) throw tpsRes.error;
-      if (kandidatRes.error) throw kandidatRes.error;
-      if (suaraRes.error) throw suaraRes.error;
-      if (rekapRes.error) throw rekapRes.error;
+      if (tpsRes.error) {
+        throw tpsRes.error;
+      }
 
-      const semuaTPS = tpsRes.data || [];
-      const semuaKandidat = kandidatRes.data || [];
-      const semuaSuara = suaraRes.data || [];
-      const semuaRekap = rekapRes.data || [];
+      if (kandidatRes.error) {
+        throw kandidatRes.error;
+      }
 
-      const hasil = semuaTPS.map((t) => {
-        const rekap = semuaRekap.find((r) => r.tps_id === t.id);
-        const suaraPerKandidat = semuaKandidat.map((k) => {
-          const s = semuaSuara.find((x) => x.tps_id === t.id && x.kandidat_id === k.id);
-          return { kandidat: k, jumlah: s?.jumlah_suara || 0 };
+      const semuaTPS =
+        tpsRes.data || [];
+
+      const semuaKandidat =
+        kandidatRes.data || [];
+
+      const daftarTPSId =
+        semuaTPS.map((t) => t.id);
+
+      let semuaSuara: any[] = [];
+      let semuaRekap: any[] = [];
+
+      // =====================================================
+      // AMBIL SUARA HANYA TPS YANG BOLEH DIAKSES
+      // =====================================================
+      if (daftarTPSId.length > 0) {
+        const [
+          suaraRes,
+          rekapRes,
+        ] = await Promise.all([
+          supabase
+            .from('hasil_suara')
+            .select('*')
+            .in(
+              'tps_id',
+              daftarTPSId
+            ),
+
+          supabase
+            .from('rekap_suara_tps')
+            .select('*')
+            .in(
+              'tps_id',
+              daftarTPSId
+            ),
+        ]);
+
+        if (suaraRes.error) {
+          throw suaraRes.error;
+        }
+
+        if (rekapRes.error) {
+          throw rekapRes.error;
+        }
+
+        semuaSuara =
+          suaraRes.data || [];
+
+        semuaRekap =
+          rekapRes.data || [];
+      }
+
+      // =====================================================
+      // SUSUN DATA
+      // =====================================================
+      const hasil =
+        semuaTPS.map((t) => {
+          const rekap =
+            semuaRekap.find(
+              (r) =>
+                r.tps_id === t.id
+            );
+
+          const suaraPerKandidat =
+            semuaKandidat.map((k) => {
+              const s =
+                semuaSuara.find(
+                  (x) =>
+                    x.tps_id === t.id &&
+                    x.kandidat_id === k.id
+                );
+
+              return {
+                kandidat: k,
+                jumlah:
+                  s?.jumlah_suara || 0,
+              };
+            });
+
+          return {
+            tps: t,
+
+            rekap:
+              rekap || {
+                status:
+                  'Belum Lapor',
+                suara_sah: 0,
+                suara_tidak_sah: 0,
+              },
+
+            suaraPerKandidat,
+          };
         });
-
-        return {
-          tps: t,
-          rekap: rekap || { status: 'Belum Lapor', suara_sah: 0, suara_tidak_sah: 0 },
-          suaraPerKandidat,
-        };
-      });
 
       setDataRealCount(hasil);
     } catch (err: any) {
-      console.error('Error Supabase (Real Count):', err);
-      alert('Error saat mengambil data real count: ' + err.message);
-    }
+      console.error(
+        'Error Supabase (Real Count):',
+        err
+      );
 
-    setLoadingRealCount(false);
+      alert(
+        'Error saat mengambil data real count: ' +
+          err.message
+      );
+    } finally {
+      setLoadingRealCount(false);
+    }
   }
 
   // Rekap total suara per kandidat, digabung dari semua TPS
@@ -4649,6 +4828,41 @@ const dataBelumDitentukanFiltered = useMemo(() => {
   }, [dataRealCount]);
 
   async function bukaInputSuara(row: any) {
+      const isAdmin =
+    user?.role === 'Super Admin' ||
+    user?.role === 'Admin';
+
+  if (
+    user?.role !== 'KPPS' &&
+    !isAdmin
+  ) {
+    alert('Akses ditolak.');
+    return;
+  }
+
+  if (user?.role === 'KPPS') {
+    const tpsAkun = String(
+      user?.tps_assigned || ''
+    ).trim();
+
+    const tpsTujuan = String(
+      row?.tps?.nomor_tps || ''
+    ).trim();
+
+    if (
+      !tpsAkun ||
+      tpsTujuan !== tpsAkun
+    ) {
+      alert(
+        `AKSES DITOLAK.\n\n` +
+        `Akun ini hanya boleh menginput hasil TPS ${
+          tpsAkun || '-'
+        }.`
+      );
+
+      return;
+    }
+  }
     const { count: jumlahDPT, error: errDPT } = await supabase
       .from('penduduk')
       .select('*', { count: 'exact', head: true })
@@ -4768,7 +4982,47 @@ const dataBelumDitentukanFiltered = useMemo(() => {
 
   async function simpanHasilSuara(e: React.FormEvent) {
     e.preventDefault();
+
     if (!modalInputSuara) return;
+
+    const isAdmin =
+      user?.role === 'Super Admin' ||
+      user?.role === 'Admin';
+
+    if (
+      user?.role !== 'KPPS' &&
+      !isAdmin
+    ) {
+      alert('Akses ditolak.');
+      setModalInputSuara(null);
+      return;
+    }
+
+    if (user?.role === 'KPPS') {
+      const tpsAkun = String(
+        user?.tps_assigned || ''
+      ).trim();
+
+      const tpsTujuan = String(
+        modalInputSuara.tps_nomor || ''
+      ).trim();
+
+      if (
+        !tpsAkun ||
+        tpsTujuan !== tpsAkun
+      ) {
+        alert(
+          `AKSES DITOLAK.\n\n` +
+          `Akun ini hanya boleh menyimpan hasil TPS ${
+            tpsAkun || '-'
+          }.`
+        );
+
+        setModalInputSuara(null);
+
+        return;
+      }
+    }
 
     setLoadingSimpanRealCount(true);
 
@@ -6012,106 +6266,297 @@ async function cetakPlanoTPS(row: any) {
   async function fetchHariH() {
     setLoadingHariH(true);
 
-    let query = supabase
-      .from('penduduk')
-      .select('id, NAMA, NIK, TPS, RT, RW, sudah_hadir_tps, waktu_hadir_tps')
-      .eq('status_dpt', 'DPT');
+    try {
+      const isAdmin =
+        user?.role === 'Super Admin' || user?.role === 'Admin';
 
-    if (filterTPS_HariH !== 'Semua') {
-      query = query.eq('TPS', filterTPS_HariH);
-    }
+      // Selain Admin/Super Admin/KPPS tidak boleh buka data Hari H
+      if (user?.role !== 'KPPS' && !isAdmin) {
+        setDataHariH([]);
+        return;
+      }
 
-    if (searchHariH) {
-      query = query.or(`NAMA.ilike.%${searchHariH}%,NIK.ilike.%${searchHariH}%`);
-    }
+      let query = supabase
+        .from('penduduk')
+        .select(
+          'id, NAMA, NIK, TPS, RT, RW, sudah_hadir_tps, waktu_hadir_tps'
+        )
+        .eq('status_dpt', 'DPT');
 
-    const { data, error } = await query.order('NAMA', { ascending: true }).limit(200);
+      // =====================================================
+      // KPPS = WAJIB TPS SENDIRI
+      // =====================================================
+      if (user?.role === 'KPPS') {
+        if (!user?.tps_assigned) {
+          setDataHariH([]);
 
-    if (error) {
-      console.error('Error Supabase (Hari H):', error);
-      alert('Error saat mengambil data kehadiran: ' + error.message);
-    } else {
+          alert(
+            'Akun KPPS ini belum memiliki TPS penugasan. Hubungi admin.'
+          );
+
+          return;
+        }
+
+        query = query.eq('TPS', user.tps_assigned);
+      }
+
+      // =====================================================
+      // ADMIN / SUPER ADMIN = BOLEH PILIH SEMUA TPS
+      // =====================================================
+      else if (filterTPS_HariH !== 'Semua') {
+        query = query.eq('TPS', filterTPS_HariH);
+      }
+
+      if (searchHariH) {
+        query = query.or(
+          `NAMA.ilike.%${searchHariH}%,NIK.ilike.%${searchHariH}%`
+        );
+      }
+
+      const { data, error } = await query
+        .order('NAMA', { ascending: true })
+        .limit(200);
+
+      if (error) {
+        throw error;
+      }
+
       setDataHariH(data || []);
+    } catch (err: any) {
+      console.error('Error Supabase (Hari H):', err);
+
+      alert(
+        'Error saat mengambil data kehadiran: ' +
+          err.message
+      );
+    } finally {
+      setLoadingHariH(false);
     }
-    setLoadingHariH(false);
   }
 
 
-  async function toggleHadirPemilih(item: any) {
+    async function toggleHadirPemilih(item: any) {
+    const isAdmin =
+      user?.role === 'Super Admin' || user?.role === 'Admin';
+
+    if (user?.role !== 'KPPS' && !isAdmin) {
+      alert('Akses ditolak.');
+      return;
+    }
+
+    // =====================================================
+    // CEK TPS SEBELUM UPDATE
+    // =====================================================
+    if (user?.role === 'KPPS') {
+      const tpsAkun = String(
+        user?.tps_assigned || ''
+      ).trim();
+
+      const tpsPemilih = String(
+        item?.TPS || ''
+      ).trim();
+
+      if (!tpsAkun || tpsPemilih !== tpsAkun) {
+        alert(
+          `AKSES DITOLAK.\n\n` +
+          `Akun ini hanya boleh mengubah data TPS ${
+            tpsAkun || '-'
+          }.`
+        );
+
+        return;
+      }
+    }
+
     setLoadingToggleHadir(item.id);
 
-    const statusBaru = !item.sudah_hadir_tps;
+    try {
+      const statusBaru = !item.sudah_hadir_tps;
 
-    const { error } = await supabase
-      .from('penduduk')
-      .update({
-        sudah_hadir_tps: statusBaru,
-        waktu_hadir_tps: statusBaru ? new Date().toISOString() : null,
-        dicatat_oleh: statusBaru ? user.nama_lengkap : null,
-      })
-      .eq('id', item.id);
+      let query = supabase
+        .from('penduduk')
+        .update({
+          sudah_hadir_tps: statusBaru,
+          waktu_hadir_tps: statusBaru
+            ? new Date().toISOString()
+            : null,
+          dicatat_oleh: statusBaru
+            ? user.nama_lengkap
+            : null,
+        })
+        .eq('id', item.id);
 
-    setLoadingToggleHadir(null);
+      // =====================================================
+      // PENGAMAN KEDUA DI QUERY
+      // =====================================================
+      if (user?.role === 'KPPS') {
+        query = query.eq(
+          'TPS',
+          user.tps_assigned
+        );
+      }
 
-    if (error) {
-      alert('Gagal mencatat kehadiran: ' + error.message);
-    } else {
-      fetchHariH();
+      const { data, error } =
+        await query.select('id');
+
+      if (error) {
+        throw error;
+      }
+
+      if (
+        user?.role === 'KPPS' &&
+        (!data || data.length === 0)
+      ) {
+        alert(
+          'Akses ditolak. Data pemilih bukan bagian dari TPS akun ini.'
+        );
+
+        return;
+      }
+
+      await Promise.all([
+        fetchHariH(),
+        fetchRekapKehadiranTPS(),
+      ]);
+    } catch (err: any) {
+      alert(
+        'Gagal mencatat kehadiran: ' +
+          err.message
+      );
+    } finally {
+      setLoadingToggleHadir(null);
     }
   }
 
-  // Rekap kehadiran per TPS, dihitung langsung dari seluruh data DPT
-  const [rekapKehadiranTPS, setRekapKehadiranTPS] = useState<any[]>([]);
-  const [loadingRekapKehadiran, setLoadingRekapKehadiran] = useState(false);
+    // Rekap kehadiran per TPS, dihitung langsung dari seluruh data DPT
+    const [rekapKehadiranTPS, setRekapKehadiranTPS] = useState<any[]>([]);
+    const [loadingRekapKehadiran, setLoadingRekapKehadiran] = useState(false);
 
-  async function fetchRekapKehadiranTPS() {
+    async function fetchRekapKehadiranTPS() {
     setLoadingRekapKehadiran(true);
+
+    const isAdmin =
+      user?.role === 'Super Admin' || user?.role === 'Admin';
+
+    if (user?.role !== 'KPPS' && !isAdmin) {
+      setRekapKehadiranTPS([]);
+      setLoadingRekapKehadiran(false);
+      return;
+    }
+
+    if (
+      user?.role === 'KPPS' &&
+      !user?.tps_assigned
+    ) {
+      setRekapKehadiranTPS([]);
+      setLoadingRekapKehadiran(false);
+      return;
+    }
 
     let semuaData: any[] = [];
     let dariBaris = 0;
+
     const ukuranHalaman = 1000;
 
     try {
       while (true) {
-        const { data, error } = await supabase
+        let query = supabase
           .from('penduduk')
           .select('TPS, sudah_hadir_tps')
-          .eq('status_dpt', 'DPT')
-          .range(dariBaris, dariBaris + ukuranHalaman - 1);
+          .eq('status_dpt', 'DPT');
 
-        if (error) throw error;
-        if (!data || data.length === 0) break;
+        // KPPS hanya rekap TPS sendiri
+        if (user?.role === 'KPPS') {
+          query = query.eq(
+            'TPS',
+            user.tps_assigned
+          );
+        }
 
-        semuaData = semuaData.concat(data);
-        if (data.length < ukuranHalaman) break;
+        const { data, error } =
+          await query.range(
+            dariBaris,
+            dariBaris + ukuranHalaman - 1
+          );
+
+        if (error) {
+          throw error;
+        }
+
+        if (!data || data.length === 0) {
+          break;
+        }
+
+        semuaData =
+          semuaData.concat(data);
+
+        if (data.length < ukuranHalaman) {
+          break;
+        }
+
         dariBaris += ukuranHalaman;
       }
 
-      const grouped: Record<string, { total: number; hadir: number }> = {};
+      const grouped: Record<
+        string,
+        {
+          total: number;
+          hadir: number;
+        }
+      > = {};
+
       semuaData.forEach((item) => {
-        const key = String(item.TPS || 'Tanpa TPS').trim() || 'Tanpa TPS';
-        if (!grouped[key]) grouped[key] = { total: 0, hadir: 0 };
+        const key =
+          String(
+            item.TPS || 'Tanpa TPS'
+          ).trim() || 'Tanpa TPS';
+
+        if (!grouped[key]) {
+          grouped[key] = {
+            total: 0,
+            hadir: 0,
+          };
+        }
+
         grouped[key].total += 1;
-        if (item.sudah_hadir_tps) grouped[key].hadir += 1;
+
+        if (item.sudah_hadir_tps) {
+          grouped[key].hadir += 1;
+        }
       });
 
       const hasil = Object.keys(grouped)
         .map((tps) => ({
           tps,
-          total: grouped[tps].total,
-          hadir: grouped[tps].hadir,
-          persen: grouped[tps].total > 0
-            ? Math.round((grouped[tps].hadir / grouped[tps].total) * 100)
-            : 0,
+
+          total:
+            grouped[tps].total,
+
+          hadir:
+            grouped[tps].hadir,
+
+          persen:
+            grouped[tps].total > 0
+              ? Math.round(
+                  (grouped[tps].hadir /
+                    grouped[tps].total) *
+                    100
+                )
+              : 0,
         }))
-        .sort((a, b) => a.tps.localeCompare(b.tps));
+        .sort((a, b) =>
+          a.tps.localeCompare(b.tps)
+        );
 
       setRekapKehadiranTPS(hasil);
     } catch (err: any) {
-      console.error('Error Supabase (Rekap Kehadiran):', err);
+      console.error(
+        'Error Supabase (Rekap Kehadiran):',
+        err
+      );
+    } finally {
+      setLoadingRekapKehadiran(false);
     }
-
-    setLoadingRekapKehadiran(false);
   }
 
   latestFetchRef.current = {
@@ -7891,21 +8336,37 @@ async function cetakPlanoTPS(row: any) {
                   onChange={(e) => setSearchHariH(e.target.value)}
                   className="flex-1 min-w-[220px] p-4 border-2 border-slate-200 rounded-xl font-bold focus:border-emerald-500 outline-none shadow-sm"
                 />
-                <select
-                  value={filterTPS_HariH}
-                  onChange={(e) => setFilterTPS_HariH(e.target.value)}
-                  className="p-4 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
-                >
-                  <option value="Semua">Semua TPS</option>
-                  {dataTPSMaster.map((t) => (
-                    <option key={t.id} value={t.nomor_tps}>
-                      TPS {t.nomor_tps}
+                {user?.role === 'KPPS' ? (
+                  <div className="p-4 border-2 border-indigo-200 bg-indigo-50 text-indigo-700 rounded-xl font-black text-sm">
+                    TPS Penugasan: {user.tps_assigned || '-'}
+                  </div>
+                ) : (
+                  <select
+                    value={filterTPS_HariH}
+                    onChange={(e) =>
+                      setFilterTPS_HariH(e.target.value)
+                    }
+                    className="p-4 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="Semua">
+                      Semua TPS
                     </option>
-                  ))}
-                </select>
+
+                    {dataTPSMaster.map((t) => (
+                      <option
+                        key={t.id}
+                        value={t.nomor_tps}
+                      >
+                        TPS {t.nomor_tps}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
-              {!searchHariH && filterTPS_HariH === 'Semua' && (
+              {user?.role !== 'KPPS' &&
+                !searchHariH &&
+                filterTPS_HariH === 'Semua' && (
                 <div className="bg-indigo-50 border border-indigo-200 text-indigo-700 p-4 rounded-xl mb-6 text-sm font-bold shadow-sm">
                   Ketik nama atau pilih TPS untuk mencari pemilih dengan cepat.
                   Menampilkan maksimal 200 data pertama.
@@ -10414,67 +10875,122 @@ async function cetakPlanoTPS(row: any) {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">
-                      Level / Role
-                    </label>
-                    <select
-                      value={modalAkun.role}
-                      onChange={(e) =>
-                        setModalAkun({ ...modalAkun, role: e.target.value })
-                      }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
-                    >
-                      <option value="Super Admin">Super Admin</option>
-                      <option value="Admin">Admin Desa</option>
-                      <option value="Petugas Coklit">Petugas Coklit</option>
-                      <option value="KPPS">Petugas KPPS</option>
-                    </select>
-                  </div>
+  <label className="block text-xs font-bold text-slate-500 mb-1">
+    Level / Role
+  </label>
 
-                  {(modalAkun.role === 'Petugas Coklit' ||
-                    modalAkun.role === 'KPPS') && (
-                    <div className="animate-in fade-in slide-in-from-top-2">
-                      <label className="block text-xs font-bold text-indigo-500 mb-1 uppercase tracking-wider">
-                        RT
-                      </label>
-                      <select
-                        value={modalAkun.rt_assigned || '001'}
-                        onChange={(e) =>
-                          setModalAkun({
-                            ...modalAkun,
-                            rt_assigned: e.target.value,
-                          })
-                        }
-                        className="w-full p-3 border-2 border-indigo-200 bg-indigo-50 text-indigo-800 rounded-xl font-black text-sm outline-none focus:border-indigo-500 cursor-pointer"
-                      >
-                        {DAFTAR_RT.map((rt) => (
-                          <option key={rt} value={rt}>
-                            RT {rt}
-                          </option>
-                        ))}
-                      </select>
-                      <label className="block text-xs font-bold text-indigo-500 mb-1 uppercase tracking-wider">
-                        RW
-                      </label>
-                      <select
-                        value={modalAkun.rw_assigned || '001'}
-                        onChange={(e) =>
-                          setModalAkun({
-                            ...modalAkun,
-                            rw_assigned: e.target.value,
-                          })
-                        }
-                        className="w-full p-3 border-2 border-indigo-200 bg-indigo-50 text-indigo-800 rounded-xl font-black text-sm outline-none focus:border-indigo-500 cursor-pointer"
-                      >
-                        {DAFTAR_RW.map((rw) => (
-                          <option key={rw} value={rw}>
-                            RW {rw}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
+  <select
+    value={modalAkun.role}
+    onChange={(e) => {
+      const roleBaru = e.target.value;
+
+      setModalAkun({
+        ...modalAkun,
+        role: roleBaru,
+
+        rt_assigned:
+          roleBaru === 'Petugas Coklit'
+            ? modalAkun.rt_assigned || '001'
+            : null,
+
+        rw_assigned:
+          roleBaru === 'Petugas Coklit'
+            ? modalAkun.rw_assigned || '001'
+            : null,
+
+        tps_assigned:
+          roleBaru === 'KPPS'
+            ? modalAkun.tps_assigned || '01'
+            : null,
+      });
+    }}
+    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 cursor-pointer"
+  >
+    <option value="Super Admin">Super Admin</option>
+    <option value="Admin">Admin Desa</option>
+    <option value="Petugas Coklit">Petugas Coklit</option>
+    <option value="KPPS">Petugas KPPS</option>
+  </select>
+</div>
+
+{modalAkun.role === 'Petugas Coklit' && (
+  <div className="animate-in fade-in slide-in-from-top-2">
+    <label className="block text-xs font-bold text-indigo-500 mb-1 uppercase tracking-wider">
+      RT
+    </label>
+
+    <select
+      value={modalAkun.rt_assigned || '001'}
+      onChange={(e) =>
+        setModalAkun({
+          ...modalAkun,
+          rt_assigned: e.target.value,
+        })
+      }
+      className="w-full p-3 border-2 border-indigo-200 bg-indigo-50 text-indigo-800 rounded-xl font-black text-sm outline-none focus:border-indigo-500 cursor-pointer"
+    >
+      {DAFTAR_RT.map((rt) => (
+        <option key={rt} value={rt}>
+          RT {rt}
+        </option>
+      ))}
+    </select>
+
+    <label className="block text-xs font-bold text-indigo-500 mb-1 mt-3 uppercase tracking-wider">
+      RW
+    </label>
+
+    <select
+      value={modalAkun.rw_assigned || '001'}
+      onChange={(e) =>
+        setModalAkun({
+          ...modalAkun,
+          rw_assigned: e.target.value,
+        })
+      }
+      className="w-full p-3 border-2 border-indigo-200 bg-indigo-50 text-indigo-800 rounded-xl font-black text-sm outline-none focus:border-indigo-500 cursor-pointer"
+    >
+      {DAFTAR_RW.map((rw) => (
+        <option key={rw} value={rw}>
+          RW {rw}
+        </option>
+      ))}
+    </select>
+  </div>
+)}
+
+{modalAkun.role === 'KPPS' && (
+  <div className="animate-in fade-in slide-in-from-top-2">
+    <label className="block text-xs font-bold text-indigo-500 mb-1 uppercase tracking-wider">
+      TPS Penugasan
+    </label>
+
+    <select
+      value={modalAkun.tps_assigned || '01'}
+      onChange={(e) =>
+        setModalAkun({
+          ...modalAkun,
+          tps_assigned: e.target.value,
+          rt_assigned: null,
+          rw_assigned: null,
+        })
+      }
+      className="w-full p-3 border-2 border-indigo-200 bg-indigo-50 text-indigo-800 rounded-xl font-black text-sm outline-none focus:border-indigo-500 cursor-pointer"
+    >
+      {DAFTAR_TPS.map((tps) => (
+        <option key={tps} value={tps}>
+          TPS {tps}
+        </option>
+      ))}
+    </select>
+
+    <p className="text-[10px] font-bold text-slate-400 mt-2">
+      Akun KPPS akan dibatasi sesuai TPS yang ditugaskan.
+    </p>
+  </div>
+)}
+
+</div>
 
                 <div>
                   <div className="flex justify-between items-end border-b border-slate-200 pb-2 mb-4">
