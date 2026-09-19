@@ -46,6 +46,12 @@ const UKURAN_HALAMAN_DAFTAR_PEMILIH = 50;
 
 const DAFTAR_DUSUN = ['I', 'II', 'III'];
 
+const MASTER_LOKASI = {
+  desa: 'Karangsambung',
+  kecamatan: 'Kedung Waringin',
+  kabupaten: 'Bekasi',
+};
+
 // Tanggal Hari H Pilkades (dipakai buat hitung umur otomatis)
 const TANGGAL_DPS = new Date(2026, 7, 8, 23, 59, 59); // 8 Agustus 2026
 const TANGGAL_DPT = new Date(2026, 8, 4, 23, 59, 59); // 4 September 2026
@@ -74,6 +80,62 @@ function hitungUmurHariH(tanggalLahir: string | null) {
       TANGGAL_HARI_H.getDate() < lahir.getDate());
   if (belumUlangTahun) umur -= 1;
   return umur;
+}
+
+
+function escapeHTML(value: any) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function terbilangAngka(nilai: number): string {
+  const n = Math.floor(Math.abs(Number(nilai) || 0));
+  const satuan = [
+    '',
+    'satu',
+    'dua',
+    'tiga',
+    'empat',
+    'lima',
+    'enam',
+    'tujuh',
+    'delapan',
+    'sembilan',
+    'sepuluh',
+    'sebelas',
+  ];
+
+  function baca(x: number): string {
+    if (x < 12) return satuan[x];
+    if (x < 20) return `${baca(x - 10)} belas`;
+    if (x < 100) return `${baca(Math.floor(x / 10))} puluh ${baca(x % 10)}`.trim();
+    if (x < 200) return `seratus ${baca(x - 100)}`.trim();
+    if (x < 1000) return `${baca(Math.floor(x / 100))} ratus ${baca(x % 100)}`.trim();
+    if (x < 2000) return `seribu ${baca(x - 1000)}`.trim();
+    if (x < 1_000_000) {
+      return `${baca(Math.floor(x / 1000))} ribu ${baca(x % 1000)}`.trim();
+    }
+    if (x < 1_000_000_000) {
+      return `${baca(Math.floor(x / 1_000_000))} juta ${baca(x % 1_000_000)}`.trim();
+    }
+    return String(x);
+  }
+
+  if (n === 0) return 'NOL';
+  return baca(n).replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+function formatTanggalPanjangIndonesia(date: Date) {
+  return date.toLocaleDateString('id-ID', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 }
 
 function hitungCountdown(waktuSekarang: Date) {
@@ -4508,7 +4570,14 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     const total = dataRealCount.length;
     const sudahFinal = dataRealCount.filter((r) => r.rekap.status === 'Sudah Final').length;
     const sedangDihitung = dataRealCount.filter((r) => r.rekap.status === 'Sedang Dihitung').length;
-    return { total, sudahFinal, sedangDihitung, belum: total - sudahFinal - sedangDihitung };
+    const terinput = sudahFinal + sedangDihitung;
+    return {
+      total,
+      sudahFinal,
+      sedangDihitung,
+      terinput,
+      belum: total - terinput,
+    };
   }, [dataRealCount]);
 
   function bukaInputSuara(row: any) {
@@ -4517,11 +4586,16 @@ const dataBelumDitentukanFiltered = useMemo(() => {
       suaraAwal[sp.kandidat.id] = sp.jumlah;
     });
 
+    const suaraSahOtomatis = row.suaraPerKandidat.reduce(
+      (total: number, sp: any) => total + (Number(sp.jumlah) || 0),
+      0
+    );
+
     setModalInputSuara({
       tps_id: row.tps.id,
       tps_nomor: row.tps.nomor_tps,
       tps_nama: row.tps.nama_lokasi,
-      suara_sah: row.rekap.suara_sah || 0,
+      suara_sah: suaraSahOtomatis,
       suara_tidak_sah: row.rekap.suara_tidak_sah || 0,
       status: row.rekap.status || 'Belum Lapor',
       suara_per_kandidat: suaraAwal,
@@ -4535,13 +4609,21 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     setLoadingSimpanRealCount(true);
 
     try {
+      // Suara sah selalu dihitung dari jumlah suara seluruh kandidat.
+      // Dengan begitu angka di Real Count dan lembar C1/Rekap TPS tidak bisa berbeda.
+      const suaraSahOtomatis = dataKandidat.reduce(
+        (total, k) =>
+          total + (Number(modalInputSuara.suara_per_kandidat[k.id]) || 0),
+        0
+      );
+
       // 1. Upsert rekap suara sah/tidak sah/status per TPS
       const { error: errRekap } = await supabase
         .from('rekap_suara_tps')
         .upsert(
           {
             tps_id: modalInputSuara.tps_id,
-            suara_sah: Number(modalInputSuara.suara_sah) || 0,
+            suara_sah: suaraSahOtomatis,
             suara_tidak_sah: Number(modalInputSuara.suara_tidak_sah) || 0,
             status: modalInputSuara.status,
             diinput_oleh: user.nama_lengkap,
@@ -4576,6 +4658,1190 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     setLoadingSimpanRealCount(false);
   }
 
+        function kotakAngkaHTML(angka: number | string, jumlahKotak = 3) {
+          const teks = String(angka ?? '');
+          const chars = teks.split('');
+          return `
+            <div style="display:flex; gap:0;">
+              ${Array.from({ length: jumlahKotak }, (_, i) => `
+                <div style="
+                  width:28px;
+                  height:28px;
+                  border:1px solid #333;
+                  display:flex;
+                  align-items:center;
+                  justify-content:center;
+                  font-weight:800;
+                  font-size:14px;
+                ">
+                  ${chars[i] || ''}
+                </div>
+              `).join('')}
+            </div>
+          `;
+        }
+
+        function tallyText(angka: number) {
+          const n = Number(angka || 0);
+          const grup5 = Math.floor(n / 5);
+          const sisa = n % 5;
+
+          let hasil = [];
+          for (let i = 0; i < grup5; i++) hasil.push('||||/');
+          if (sisa > 0) hasil.push('|'.repeat(sisa));
+
+          return hasil.join(' ');
+        }
+
+        function escapeAttr(value: any) {
+          return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        }
+
+        function terbilangAngka(n: number): string {
+          const angka = [
+            '',
+            'satu',
+            'dua',
+            'tiga',
+            'empat',
+            'lima',
+            'enam',
+            'tujuh',
+            'delapan',
+            'sembilan',
+            'sepuluh',
+            'sebelas',
+          ];
+
+          if (n < 12) return angka[n];
+          if (n < 20) return terbilangAngka(n - 10) + ' belas';
+          if (n < 100)
+            return (
+              terbilangAngka(Math.floor(n / 10)) +
+              ' puluh' +
+              (n % 10 ? ' ' + terbilangAngka(n % 10) : '')
+            );
+          if (n < 200)
+            return 'seratus' + (n - 100 ? ' ' + terbilangAngka(n - 100) : '');
+          if (n < 1000)
+            return (
+              terbilangAngka(Math.floor(n / 100)) +
+              ' ratus' +
+              (n % 100 ? ' ' + terbilangAngka(n % 100) : '')
+            );
+          if (n < 2000)
+            return 'seribu' + (n - 1000 ? ' ' + terbilangAngka(n - 1000) : '');
+
+          return String(n);
+        }
+
+  async function cetakC1TPS(row: any) {
+    // Buka jendela lebih dulu supaya tidak diblokir browser setelah proses await.
+    const printWindow = window.open('', '_blank', 'width=1000,height=900');
+    if (!printWindow) {
+      alert('Popup diblokir browser. Izinkan popup untuk mencetak C1 / Rekap TPS.');
+      return;
+    }
+
+    printWindow.document.write(`
+      <html>
+        <head><title>Menyiapkan Rekap TPS...</title></head>
+        <body style="font-family:Arial,sans-serif;padding:30px">
+          Menyiapkan data TPS ${escapeHTML(row.tps.nomor_tps)}...
+        </body>
+      </html>
+    `);
+
+    try {
+      const nomorTPS = row.tps.nomor_tps;
+      const tpsId = row.tps.id;
+
+      const [
+        dptTotalRes,
+        dptLRes,
+        dptPRes,
+        hadirTotalRes,
+        hadirLRes,
+        hadirPRes,
+        disabilitasTotalRes,
+        disabilitasLRes,
+        disabilitasPRes,
+        kppsRes,
+        saksiRes,
+      ] = await Promise.all([
+        supabase
+          .from('penduduk')
+          .select('*', { count: 'exact', head: true })
+          .eq('status_dpt', 'DPT')
+          .eq('TPS', nomorTPS),
+        supabase
+          .from('penduduk')
+          .select('*', { count: 'exact', head: true })
+          .eq('status_dpt', 'DPT')
+          .eq('TPS', nomorTPS)
+          .eq('KELAMIN', 'L'),
+        supabase
+          .from('penduduk')
+          .select('*', { count: 'exact', head: true })
+          .eq('status_dpt', 'DPT')
+          .eq('TPS', nomorTPS)
+          .eq('KELAMIN', 'P'),
+        supabase
+          .from('penduduk')
+          .select('*', { count: 'exact', head: true })
+          .eq('status_dpt', 'DPT')
+          .eq('TPS', nomorTPS)
+          .eq('sudah_hadir_tps', true),
+        supabase
+          .from('penduduk')
+          .select('*', { count: 'exact', head: true })
+          .eq('status_dpt', 'DPT')
+          .eq('TPS', nomorTPS)
+          .eq('sudah_hadir_tps', true)
+          .eq('KELAMIN', 'L'),
+        supabase
+          .from('penduduk')
+          .select('*', { count: 'exact', head: true })
+          .eq('status_dpt', 'DPT')
+          .eq('TPS', nomorTPS)
+          .eq('sudah_hadir_tps', true)
+          .eq('KELAMIN', 'P'),
+        supabase
+          .from('penduduk')
+          .select('*', { count: 'exact', head: true })
+          .eq('status_dpt', 'DPT')
+          .eq('TPS', nomorTPS)
+          .not('ragam_disabilitas', 'is', null),
+        supabase
+          .from('penduduk')
+          .select('*', { count: 'exact', head: true })
+          .eq('status_dpt', 'DPT')
+          .eq('TPS', nomorTPS)
+          .eq('KELAMIN', 'L')
+          .not('ragam_disabilitas', 'is', null),
+        supabase
+          .from('penduduk')
+          .select('*', { count: 'exact', head: true })
+          .eq('status_dpt', 'DPT')
+          .eq('TPS', nomorTPS)
+          .eq('KELAMIN', 'P')
+          .not('ragam_disabilitas', 'is', null),
+        supabase
+          .from('anggota_kpps')
+          .select('*')
+          .eq('tps_id', tpsId),
+        supabase
+          .from('saksi')
+          .select('*, kandidat:kandidat_id(nama, nomor_urut)')
+          .eq('tps_id', tpsId),
+      ]);
+
+      const semuaRes = [
+        dptTotalRes,
+        dptLRes,
+        dptPRes,
+        hadirTotalRes,
+        hadirLRes,
+        hadirPRes,
+        disabilitasTotalRes,
+        disabilitasLRes,
+        disabilitasPRes,
+        kppsRes,
+        saksiRes,
+      ];
+
+      const errorPertama = semuaRes.find((r: any) => r.error)?.error;
+      if (errorPertama) throw errorPertama;
+
+      const dptTotal = dptTotalRes.count || 0;
+      const dptL = dptLRes.count || 0;
+      const dptP = dptPRes.count || 0;
+      const hadirTotal = hadirTotalRes.count || 0;
+      const hadirL = hadirLRes.count || 0;
+      const hadirP = hadirPRes.count || 0;
+      const disabilitasTotal = disabilitasTotalRes.count || 0;
+      const disabilitasL = disabilitasLRes.count || 0;
+      const disabilitasP = disabilitasPRes.count || 0;
+
+      const suaraSah = row.suaraPerKandidat.reduce(
+        (total: number, sp: any) => total + (Number(sp.jumlah) || 0),
+        0
+      );
+      const suaraTidakSah = Number(row.rekap.suara_tidak_sah) || 0;
+      const totalSuratSuara = suaraSah + suaraTidakSah;
+
+      const kandidatRows = [...row.suaraPerKandidat]
+        .sort(
+          (a: any, b: any) =>
+            Number(a.kandidat.nomor_urut || 0) - Number(b.kandidat.nomor_urut || 0)
+        )
+        .map(
+          (sp: any) => `
+            <tr>
+              <td class="center">${escapeHTML(sp.kandidat.nomor_urut)}</td>
+              <td>${escapeHTML(sp.kandidat.nama)}</td>
+              <td class="center angka">${Number(sp.jumlah || 0).toLocaleString('id-ID')}</td>
+              <td>${escapeHTML(terbilangAngka(Number(sp.jumlah || 0)))}</td>
+            </tr>
+          `
+        )
+        .join('');
+
+      const kpps = [...(kppsRes.data || [])].sort((a: any, b: any) => {
+        const aKetua = String(a.jabatan || '').toLowerCase().includes('ketua') ? 0 : 1;
+        const bKetua = String(b.jabatan || '').toLowerCase().includes('ketua') ? 0 : 1;
+        if (aKetua !== bKetua) return aKetua - bKetua;
+
+        const aNomor = Number(String(a.jabatan || '').match(/\d+/)?.[0] || 99);
+        const bNomor = Number(String(b.jabatan || '').match(/\d+/)?.[0] || 99);
+        return aNomor - bNomor;
+      });
+
+      const saksi = [...(saksiRes.data || [])].sort(
+        (a: any, b: any) =>
+          Number(a.kandidat?.nomor_urut || 99) - Number(b.kandidat?.nomor_urut || 99)
+      );
+
+      const kppsCells = Array.from({ length: 7 }, (_, i) => {
+        const orang = kpps[i];
+        return `
+          <td class="signature-cell">
+            <div class="signature-role">${i === 0 ? 'KETUA' : `ANGGOTA ${i}`}</div>
+            <div class="signature-space"></div>
+            <div class="signature-name">${escapeHTML(orang?.nama || '........................')}</div>
+          </td>
+        `;
+      }).join('');
+
+      const saksiCells = Array.from({ length: 5 }, (_, i) => {
+        const orang = saksi[i];
+        return `
+          <td class="signature-cell">
+            <div class="signature-role">SAKSI No.${i + 1}</div>
+            <div class="candidate-small">${escapeHTML(orang?.kandidat?.nama || '')}</div>
+            <div class="signature-space"></div>
+            <div class="signature-name">${escapeHTML(orang?.nama || '........................')}</div>
+          </td>
+        `;
+      }).join('');
+
+      const desa = row.tps.desa || 'Karangsambung';
+      const kecamatan = row.tps.kecamatan || 'Kedung Waringin';
+      const kabupaten = row.tps.kabupaten || 'Bekasi';
+      const status = row.rekap.status || 'Belum Lapor';
+      const tanggalPanjang = formatTanggalPanjangIndonesia(TANGGAL_HARI_H);
+
+      const html = `
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>C1 Internal - TPS ${escapeHTML(nomorTPS)}</title>
+  <style>
+    @page {
+      size: 215mm 330mm;
+      margin: 10mm 10mm 11mm 10mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #111;
+      font-size: 11px;
+      line-height: 1.25;
+      background: white;
+    }
+    .sheet {
+      width: 100%;
+      min-height: 305mm;
+      position: relative;
+    }
+    .no-print {
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .btn {
+      border: 0;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-print { background: #059669; color: white; }
+    .btn-close { background: #e5e7eb; color: #111827; }
+    .header {
+      text-align: center;
+      font-weight: 800;
+      line-height: 1.3;
+      margin-bottom: 10px;
+    }
+    .header .title { font-size: 16px; }
+    .header .sub { font-size: 13px; }
+    .internal-note {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 3px 8px;
+      border: 1px solid #999;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .4px;
+    }
+    .identity {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0 10px;
+    }
+    .identity td {
+      padding: 2px 3px;
+      vertical-align: top;
+    }
+    .identity .label { width: 95px; font-weight: 700; }
+    .identity .colon { width: 12px; }
+    h3 {
+      font-size: 11px;
+      margin: 10px 0 5px;
+      text-transform: uppercase;
+    }
+    table.grid {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 8px;
+    }
+    .grid th,
+    .grid td {
+      border: 1px solid #333;
+      padding: 5px 6px;
+      vertical-align: middle;
+    }
+    .grid th {
+      background: #e5e5e5;
+      text-align: center;
+      font-weight: 800;
+    }
+    .center { text-align: center; }
+    .angka { font-weight: 800; font-size: 12px; }
+    .summary td:first-child { font-weight: 800; }
+    .status-box {
+      border: 1px solid #555;
+      padding: 6px 8px;
+      margin: 7px 0 10px;
+      font-size: 10px;
+    }
+    .sign-title {
+      background: #ddd;
+      border: 1px solid #333;
+      border-bottom: 0;
+      text-align: center;
+      font-weight: 800;
+      padding: 4px;
+      margin-top: 10px;
+    }
+    .sign-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .sign-table td {
+      border: 1px solid #333;
+      text-align: center;
+      width: 14.285%;
+      padding: 3px;
+      vertical-align: top;
+    }
+    .signature-role { font-weight: 800; font-size: 9px; }
+    .candidate-small {
+      min-height: 12px;
+      font-size: 8px;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+    .signature-space { height: 35px; }
+    .signature-name {
+      font-size: 8px;
+      font-weight: 700;
+      min-height: 11px;
+    }
+    .declaration {
+      margin: 8px 0 7px;
+      font-size: 10px;
+      text-align: justify;
+    }
+    .footnote {
+      margin-top: 7px;
+      font-size: 8px;
+      color: #444;
+    }
+    @media print {
+      .no-print { display: none !important; }
+      body { background: white; }
+      .sheet { min-height: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="no-print">
+      <button class="btn btn-close" onclick="window.close()">Tutup</button>
+      <button class="btn btn-print" onclick="window.print()">Cetak F4</button>
+    </div>
+
+    <div class="header">
+      <div class="title">FORM REKAP HASIL PENGHITUNGAN SUARA TPS</div>
+      <div class="sub">PEMILIHAN KEPALA DESA ${escapeHTML(String(desa).toUpperCase())}</div>
+      <div class="sub">KECAMATAN ${escapeHTML(String(kecamatan).toUpperCase())} · KABUPATEN ${escapeHTML(String(kabupaten).toUpperCase())}</div>
+      <div class="sub">TAHUN 2026</div>
+      <div class="internal-note">C1 / REKAP TPS INTERNAL SISTEM</div>
+    </div>
+
+    <table class="identity">
+      <tr>
+        <td class="label">Nomor TPS</td><td class="colon">:</td><td><b>${escapeHTML(nomorTPS)}</b></td>
+        <td class="label">Lokasi TPS</td><td class="colon">:</td><td>${escapeHTML(row.tps.nama_lokasi || '-')}</td>
+      </tr>
+      <tr>
+        <td class="label">Desa</td><td class="colon">:</td><td>${escapeHTML(desa)}</td>
+        <td class="label">Kabupaten</td><td class="colon">:</td><td>${escapeHTML(kabupaten)}</td>
+      </tr>
+      <tr>
+        <td class="label">Kecamatan</td><td class="colon">:</td><td>${escapeHTML(kecamatan)}</td>
+        <td class="label">Hari/Tanggal</td><td class="colon">:</td><td>${escapeHTML(tanggalPanjang)}</td>
+      </tr>
+    </table>
+
+    <h3>1. Data Pemilih</h3>
+    <table class="grid">
+      <thead>
+        <tr>
+          <th style="width:42%">URAIAN</th>
+          <th style="width:15%">L</th>
+          <th style="width:15%">P</th>
+          <th style="width:18%">L + P</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Jumlah Pemilih dalam DPT</td><td class="center">${dptL}</td><td class="center">${dptP}</td><td class="center angka">${dptTotal}</td></tr>
+        <tr><td>Jumlah Pemilih hadir ke TPS</td><td class="center">${hadirL}</td><td class="center">${hadirP}</td><td class="center angka">${hadirTotal}</td></tr>
+        <tr><td>Pemilih Disabilitas dalam DPT</td><td class="center">${disabilitasL}</td><td class="center">${disabilitasP}</td><td class="center">${disabilitasTotal}</td></tr>
+      </tbody>
+    </table>
+
+    <h3>2. Rincian Perolehan Suara</h3>
+    <table class="grid">
+      <thead>
+        <tr>
+          <th style="width:8%">NO</th>
+          <th style="width:37%">NAMA CALON</th>
+          <th style="width:16%">SUARA SAH</th>
+          <th>TERBILANG</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${kandidatRows}
+      </tbody>
+    </table>
+
+    <h3>3. Rekapitulasi Suara Sah dan Tidak Sah</h3>
+    <table class="grid summary">
+      <tbody>
+        <tr>
+          <td>Jumlah seluruh suara sah</td>
+          <td class="center angka" style="width:16%">${suaraSah.toLocaleString('id-ID')}</td>
+          <td>${escapeHTML(terbilangAngka(suaraSah))}</td>
+        </tr>
+        <tr>
+          <td>Jumlah suara tidak sah</td>
+          <td class="center angka">${suaraTidakSah.toLocaleString('id-ID')}</td>
+          <td>${escapeHTML(terbilangAngka(suaraTidakSah))}</td>
+        </tr>
+        <tr>
+          <td>Jumlah suara sah dan tidak sah</td>
+          <td class="center angka">${totalSuratSuara.toLocaleString('id-ID')}</td>
+          <td>${escapeHTML(terbilangAngka(totalSuratSuara))}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="status-box">
+      <b>Status laporan TPS:</b> ${escapeHTML(status)}<br/>
+      <b>Terakhir diinput oleh:</b> ${escapeHTML(row.rekap.diinput_oleh || '-')}
+    </div>
+
+    <p class="declaration">
+      Rekap ini dibuat dari data yang diinput pada sistem penghitungan cepat TPS.
+      Angka perolehan calon, suara sah, dan suara tidak sah menjadi sumber yang sama
+      untuk tampilan Real Count sehingga tidak perlu diinput ulang.
+    </p>
+
+    <div class="sign-title">NAMA DAN TANDA TANGAN KPPS</div>
+    <table class="sign-table">
+      <tr>${kppsCells}</tr>
+    </table>
+
+    <div class="sign-title">NAMA DAN TANDA TANGAN SAKSI</div>
+    <table class="sign-table">
+      <tr>${saksiCells}</tr>
+    </table>
+
+    <div class="footnote">
+      Dokumen ini adalah format C1/Rekap TPS internal pada aplikasi. Gunakan format/nomenklatur resmi
+      dari Panitia Pilkades Kabupaten Bekasi apabila terdapat perbedaan dengan petunjuk pelaksanaan yang berlaku.
+    </div>
+  </div>
+</body>
+</html>`;
+
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+    } catch (err: any) {
+      printWindow.close();
+      console.error('Gagal menyiapkan C1 / Rekap TPS:', err);
+      alert('Gagal menyiapkan C1 / Rekap TPS: ' + err.message);
+    }
+  }
+
+async function cetakPlanoTPS(row: any) {
+  const printWindow = window.open('', '_blank', 'width=1100,height=900');
+  if (!printWindow) {
+    alert('Popup diblokir browser. Izinkan popup untuk mencetak Plano.');
+    return;
+  }
+
+  printWindow.document.write(`
+    <html>
+      <head><title>Menyiapkan Plano TPS...</title></head>
+      <body style="font-family:Arial,sans-serif;padding:30px">
+        Menyiapkan Plano TPS ${escapeHTML(row.tps.nomor_tps)}...
+      </body>
+    </html>
+  `);
+
+  try {
+    const nomorTPS = row.tps.nomor_tps;
+    const tpsId = row.tps.id;
+
+    // COPY DARI cetakC1TPS(row) PUNYA LO
+    const [
+      dptTotalRes,
+      dptLRes,
+      dptPRes,
+      hadirTotalRes,
+      hadirLRes,
+      hadirPRes,
+      disabilitasTotalRes,
+      disabilitasLRes,
+      disabilitasPRes,
+      kppsRes,
+      saksiRes,
+    ] = await Promise.all([
+      supabase
+        .from('penduduk')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_dpt', 'DPT')
+        .eq('TPS', nomorTPS),
+
+      supabase
+        .from('penduduk')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_dpt', 'DPT')
+        .eq('TPS', nomorTPS)
+        .eq('KELAMIN', 'L'),
+
+      supabase
+        .from('penduduk')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_dpt', 'DPT')
+        .eq('TPS', nomorTPS)
+        .eq('KELAMIN', 'P'),
+
+      supabase
+        .from('penduduk')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_dpt', 'DPT')
+        .eq('TPS', nomorTPS)
+        .eq('sudah_hadir_tps', true),
+
+      supabase
+        .from('penduduk')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_dpt', 'DPT')
+        .eq('TPS', nomorTPS)
+        .eq('sudah_hadir_tps', true)
+        .eq('KELAMIN', 'L'),
+
+      supabase
+        .from('penduduk')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_dpt', 'DPT')
+        .eq('TPS', nomorTPS)
+        .eq('sudah_hadir_tps', true)
+        .eq('KELAMIN', 'P'),
+
+      supabase
+        .from('penduduk')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_dpt', 'DPT')
+        .eq('TPS', nomorTPS)
+        .not('ragam_disabilitas', 'is', null),
+
+      supabase
+        .from('penduduk')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_dpt', 'DPT')
+        .eq('TPS', nomorTPS)
+        .eq('KELAMIN', 'L')
+        .not('ragam_disabilitas', 'is', null),
+
+      supabase
+        .from('penduduk')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_dpt', 'DPT')
+        .eq('TPS', nomorTPS)
+        .eq('KELAMIN', 'P')
+        .not('ragam_disabilitas', 'is', null),
+
+      supabase.from('anggota_kpps').select('*').eq('tps_id', tpsId),
+
+      supabase
+        .from('saksi')
+        .select('*, kandidat:kandidat_id(nama, nomor_urut)')
+        .eq('tps_id', tpsId),
+    ]);
+
+    const semuaRes = [
+      dptTotalRes,
+      dptLRes,
+      dptPRes,
+      hadirTotalRes,
+      hadirLRes,
+      hadirPRes,
+      disabilitasTotalRes,
+      disabilitasLRes,
+      disabilitasPRes,
+      kppsRes,
+      saksiRes,
+    ];
+
+    const errorPertama = semuaRes.find((r: any) => r.error)?.error;
+    if (errorPertama) throw errorPertama;
+
+    const dptTotal = dptTotalRes.count || 0;
+    const dptL = dptLRes.count || 0;
+    const dptP = dptPRes.count || 0;
+    const hadirTotal = hadirTotalRes.count || 0;
+    const hadirL = hadirLRes.count || 0;
+    const hadirP = hadirPRes.count || 0;
+    const disabilitasTotal = disabilitasTotalRes.count || 0;
+    const disabilitasL = disabilitasLRes.count || 0;
+    const disabilitasP = disabilitasPRes.count || 0;
+
+    const suaraPerKandidat = [...row.suaraPerKandidat].sort(
+      (a: any, b: any) =>
+        Number(a.kandidat.nomor_urut || 0) - Number(b.kandidat.nomor_urut || 0)
+    );
+
+    const suaraSah = suaraPerKandidat.reduce(
+      (total: number, sp: any) => total + (Number(sp.jumlah) || 0),
+      0
+    );
+
+    const suaraTidakSah = Number(row.rekap.suara_tidak_sah) || 0;
+    const totalSahTidakSah = suaraSah + suaraTidakSah;
+
+    // kalau mau otomatis sesuai logika "DPT + cadangan 5%"
+    const suratSuaraDiterima = dptTotal + Math.ceil(dptTotal * 0.05);
+    const suratSuaraDigunakan = totalSahTidakSah;
+    const suratSuaraTidakDigunakan = Math.max(
+      0,
+      suratSuaraDiterima - suratSuaraDigunakan
+    );
+    const desa = row.tps.desa || MASTER_LOKASI.desa;
+    const kecamatan = row.tps.kecamatan || MASTER_LOKASI.kecamatan;
+    const kabupaten = row.tps.kabupaten || MASTER_LOKASI.kabupaten;
+
+    const kpps = [...(kppsRes.data || [])].sort((a: any, b: any) => {
+      const aKetua = String(a.jabatan || '').toLowerCase().includes('ketua') ? 0 : 1;
+      const bKetua = String(b.jabatan || '').toLowerCase().includes('ketua') ? 0 : 1;
+      if (aKetua !== bKetua) return aKetua - bKetua;
+      return 0;
+    });
+
+    const saksi = [...(saksiRes.data || [])].sort(
+      (a: any, b: any) =>
+        Number(a.kandidat?.nomor_urut || 99) - Number(b.kandidat?.nomor_urut || 99)
+    );
+
+    const kppsCells = Array.from({ length: 7 }, (_, i) => {
+      const orang = kpps[i];
+      return `
+        <td class="ttd-cell">
+          <div class="ttd-role">${i === 0 ? '1 KETUA' : `${i + 1} ANGGOTA`}</div>
+          <div class="ttd-space"></div>
+          <div class="ttd-name">${escapeHTML(orang?.nama || '....................')}</div>
+        </td>
+      `;
+    }).join('');
+
+    const saksiCells = Array.from({ length: 5 }, (_, i) => {
+      const orang = saksi[i];
+      return `
+        <td class="ttd-cell">
+          <div class="ttd-role">SAKSI No.${i + 1}</div>
+          <div class="ttd-small">${escapeHTML(orang?.kandidat?.nama || 'Nama Calon')}</div>
+          <div class="ttd-space"></div>
+          <div class="ttd-name">${escapeHTML(orang?.nama || '....................')}</div>
+        </td>
+      `;
+    }).join('');
+
+    const kandidatBlokHal2 = Array.from({ length: 5 }, (_, i) => {
+      const sp = suaraPerKandidat[i];
+      if (!sp) {
+        return `
+          <tr>
+            <td class="calon-kiri">
+              <div class="urut">(No. Urut)</div>
+              <div class="foto-box">FOTO<br/>CALON</div>
+              <div class="nama-calon">(NAMA CALON)</div>
+            </td>
+            <td class="rincian-area">${Array.from({ length: 10 }, () => `<div class="kotak-kecil"></div>`).join('')}</td>
+            <td class="jumlah-baris"></td>
+            <td class="jumlah-suara"></td>
+          </tr>
+        `;
+      }
+
+      const jumlah = Number(sp.jumlah || 0);
+      const baris = Math.ceil(jumlah / 5);
+      const fotoUrl =
+        sp.kandidat?.foto_url ||
+        sp.kandidat?.foto ||
+        sp.kandidat?.photo_url ||
+        '';
+
+      return `
+        <tr>
+          <td class="calon-kiri">
+            <div class="urut">(${escapeHTML(sp.kandidat.nomor_urut)})</div>
+            ${
+              fotoUrl
+                ? `<img src="${escapeAttr(fotoUrl)}" class="foto-calon-img" />`
+                : `<div class="foto-box">FOTO<br/>CALON</div>`
+            }
+            <div class="nama-calon">${escapeHTML(sp.kandidat.nama)}</div>
+          </td>
+          <td class="rincian-area">
+            <div class="tally-text">${escapeHTML(tallyText(jumlah))}</div>
+          </td>
+          <td class="jumlah-baris center">${baris}</td>
+          <td class="jumlah-suara">
+          <div class="terbilang-suara">
+            ${escapeHTML(terbilangAngka(jumlah).toUpperCase())}
+          </div>
+        </td>
+        </tr>
+      `;
+    }).join('');
+
+    const html = `
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page {
+      size: 215mm 330mm;
+      margin: 10mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #111;
+      background: #fff;
+      font-size: 11px;
+    }
+    .toolbar {
+      padding: 10px;
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+    }
+    .btn {
+      border:0;
+      padding:8px 14px;
+      border-radius:6px;
+      font-weight:700;
+      cursor:pointer;
+    }
+    .btn-print { background:#059669; color:white; }
+    .btn-close { background:#e5e7eb; color:#111827; }
+    .page {
+      width: 100%;
+      min-height: 305mm;
+      page-break-after: always;
+      padding: 0;
+    }
+    .page:last-child { page-break-after: auto; }
+    .judul {
+      text-align:center;
+      font-weight:800;
+      line-height:1.2;
+      margin-bottom:12px;
+    }
+    .judul .besar { font-size:14px; }
+    .judul .sedang { font-size:12px; }
+    .info-atas {
+      width:100%;
+      border-collapse:collapse;
+      margin-bottom:18px;
+      font-weight:700;
+    }
+    .info-atas td {
+      padding:3px 4px;
+      vertical-align:top;
+    }
+    .label { width:120px; }
+    .titik {
+      display:inline-block;
+      min-width:170px;
+      border-bottom:1px dotted #333;
+      text-align:center;
+    }
+    .section-title {
+      font-size:12px;
+      font-weight:800;
+      margin:18px 0 8px;
+    }
+    table.grid {
+      width:100%;
+      border-collapse:collapse;
+      margin-bottom:12px;
+    }
+    .grid th, .grid td {
+      border:1px solid #333;
+      padding:6px 6px;
+      vertical-align:middle;
+    }
+    .grid th {
+      background:#d9d9d9;
+      text-align:center;
+      font-weight:800;
+    }
+    .center { text-align:center; }
+    .kanan { text-align:right; }
+    .ttd-title {
+      background:#d9d9d9;
+      border:1px solid #333;
+      border-bottom:0;
+      text-align:center;
+      font-weight:800;
+      padding:4px;
+      margin-top:10px;
+    }
+    table.ttd {
+      width:100%;
+      border-collapse:collapse;
+      margin-bottom:10px;
+    }
+    .ttd td {
+      border:1px solid #333;
+      width:14.28%;
+      text-align:center;
+      vertical-align:top;
+      padding:3px;
+    }
+    .ttd-saksi td { width:20%; }
+    .ttd-role { font-weight:800; font-size:9px; }
+    .ttd-small { font-size:8px; font-weight:700; min-height:18px; }
+    .ttd-space { height:34px; }
+    .ttd-name { font-size:8px; font-weight:700; }
+    .page-no {
+      margin-top:8px;
+      font-size:10px;
+    }
+
+    .calon-kiri {
+      width:22%;
+      vertical-align:top;
+      text-align:center;
+      font-weight:700;
+    }
+    .foto-box, .foto-calon-img {
+      width:72px;
+      height:88px;
+      border:1px solid #333;
+      margin:6px auto;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:12px;
+      font-weight:800;
+      object-fit:cover;
+      background:#fff;
+    }
+    .nama-calon { margin-top:6px; font-weight:800; }
+    .urut { font-size:11px; font-weight:800; }
+    .rincian-area {
+      width:48%;
+      min-height:110px;
+      vertical-align:top;
+    }
+    .tally-text {
+      min-height:110px;
+      font-size:14px;
+      line-height:1.7;
+      letter-spacing:1px;
+      word-break:break-word;
+      padding:6px;
+    }
+    .jumlah-baris { width:8%; font-weight:800; }
+    .jumlah-suara { width:14%; text-align:center; vertical-align:top; }
+    .terbilang-mini {
+      font-size:8px;
+      margin-top:4px;
+      text-align:right;
+    }
+    .terbilang-suara {
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+      line-height: 1.4;
+      padding: 8px 4px;
+      word-break: break-word;
+    }
+
+    .footer-note {
+      margin-top:8px;
+      font-size:9px;
+      text-align:center;
+    }
+    .ditetapkan {
+      width:100%;
+      margin:24px 0 8px;
+      font-weight:700;
+    }
+    .ditetapkan td { padding:4px 0; }
+
+    @media print {
+      .toolbar { display:none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="btn btn-close" onclick="window.close()">Tutup</button>
+    <button class="btn btn-print" onclick="window.print()">Cetak Plano</button>
+  </div>
+
+  <!-- HALAMAN 1 -->
+  <div class="page">
+    <div class="judul">
+      <div class="besar">PLANO PENGHITUNGAN SUARA</div>
+      <div class="besar">PADA PEMILIHAN KEPALA DESA <span>${escapeHTML(String(desa).toUpperCase())}</span></div>
+      <div class="besar">KECAMATAN <span>${escapeHTML(String(kecamatan).toUpperCase())}</span> KABUPATEN BEKASI</div>
+      <div class="besar">TAHUN 2026</div>
+    </div>
+
+    <table class="info-atas">
+      <tr>
+        <td class="label">NOMOR TPS</td><td>: <span>${escapeHTML(nomorTPS)}</span></td>
+        <td class="label">KECAMATAN</td><td>: <span>${escapeHTML(kecamatan).toUpperCase()}</span></td>
+      </tr>
+      <tr>
+        <td class="label">DESA</td><td>: <span>${escapeHTML(desa).toUpperCase()}</span></td>
+        <td class="label">KABUPATEN</td><td>: <b>BEKASI</b></td>
+      </tr>
+    </table>
+
+    <div class="section-title">1. DATA PEMILIH</div>
+    <table class="grid">
+      <tr>
+        <th style="width:7%">NO</th>
+        <th>URAIAN</th>
+        <th style="width:18%">L</th>
+        <th style="width:18%">P</th>
+        <th style="width:18%">L+P</th>
+      </tr>
+      <tr>
+        <td class="center">A</td>
+        <td>Jumlah Pemilih dalam DPT</td>
+        <td class="center">${dptL}</td>
+        <td class="center">${dptP}</td>
+        <td class="center"><b>${dptTotal}</b></td>
+      </tr>
+      <tr>
+        <td class="center">B</td>
+        <td>Jumlah Pemilih hadir ke TPS</td>
+        <td class="center">${hadirL}</td>
+        <td class="center">${hadirP}</td>
+        <td class="center"><b>${hadirTotal}</b></td>
+      </tr>
+      <tr>
+        <td class="center">C</td>
+        <td>Pemilih Disabilitas</td>
+        <td class="center">${disabilitasL}</td>
+        <td class="center">${disabilitasP}</td>
+        <td class="center"><b>${disabilitasTotal}</b></td>
+      </tr>
+    </table>
+
+    <div class="section-title">2. DATA PENGGUNAAN SURAT SUARA</div>
+    <table class="grid">
+      <tr>
+        <th style="width:7%">NO</th>
+        <th>URAIAN</th>
+        <th style="width:20%">JUMLAH</th>
+      </tr>
+      <tr>
+        <td class="center">A</td>
+        <td>Surat suara diterima + cadangan 5%</td>
+        <td class="center"><b>${suratSuaraDiterima}</b></td>
+      </tr>
+      <tr>
+        <td class="center">B</td>
+        <td>Surat Suara digunakan</td>
+        <td class="center"><b>${suratSuaraDigunakan}</b></td>
+      </tr>
+      <tr>
+        <td class="center">C</td>
+        <td>Surat suara tidak digunakan (termasuk surat suara yg rusak)</td>
+        <td class="center"><b>${suratSuaraTidakDigunakan}</b></td>
+      </tr>
+    </table>
+
+    <div class="ttd-title">NAMA DAN TANDA TANGAN KPPS</div>
+    <table class="ttd">
+      <tr>${kppsCells}</tr>
+    </table>
+
+    <div class="ttd-title">NAMA DAN TANDA TANGAN SAKSI</div>
+    <table class="ttd ttd-saksi">
+      <tr>${saksiCells}</tr>
+    </table>
+
+    <div class="page-no">Halaman 1 dari 3</div>
+  </div>
+
+  <!-- HALAMAN 2 -->
+  <div class="page">
+    <div class="judul">
+      <div class="besar">PLANO PENGHITUNGAN SUARA</div>
+      <div class="besar">PADA PEMILIHAN KEPALA DESA ${escapeHTML(String(desa).toUpperCase())}</div>
+      <div class="besar">KECAMATAN ${escapeHTML(String(kecamatan).toUpperCase())} KABUPATEN BEKASI</div>
+      <div class="besar">TAHUN 2026</div>
+    </div>
+
+    <div class="section-title">3. DATA RINCIAN PEROLEHAN SUARA</div>
+    <table class="grid">
+      <tr>
+        <th style="width:22%">NOMOR, FOTO DAN NAMA CALON</th>
+        <th style="width:48%">RINCIAN PEROLEHAN SUARA</th>
+        <th style="width:8%">JUMLAH BARIS</th>
+        <th style="width:14%">JUMLAH SUARA SAH</th>
+      </tr>
+      ${kandidatBlokHal2}
+    </table>
+
+    <div class="ttd-title">NAMA DAN TANDA TANGAN KPPS</div>
+    <table class="ttd">
+      <tr>${kppsCells}</tr>
+    </table>
+
+    <div class="ttd-title">NAMA DAN TANDA TANGAN SAKSI</div>
+    <table class="ttd ttd-saksi">
+      <tr>${saksiCells}</tr>
+    </table>
+
+    <div class="page-no">Halaman 2 dari 3</div>
+  </div>
+
+  <!-- HALAMAN 3 -->
+  <div class="page">
+    <div class="judul">
+      <div class="besar">PLANO PENGHITUNGAN SUARA</div>
+      <div class="besar">PADA PEMILIHAN KEPALA DESA ${escapeHTML(String(desa).toUpperCase())}</div>
+      <div class="besar">KECAMATAN ${escapeHTML(String(kecamatan).toUpperCase())} KABUPATEN BEKASI</div>
+      <div class="besar">TAHUN 2026</div>
+    </div>
+
+    <div class="section-title">4. DATA SUARA SAH DAN TIDAK SAH</div>
+    <table class="grid">
+      <tr>
+        <th style="width:8%"></th>
+        <th style="width:24%"></th>
+        <th>RINCIAN PEROLEHAN SUARA TIDAK SAH</th>
+        <th style="width:20%">JUMLAH</th>
+      </tr>
+      <tr>
+        <td class="center"><b>A</b></td>
+        <td class="center"><b>JUMLAH SUARA TIDAK SAH</b></td>
+        <td style="height:100px;"></td>
+        <td class="center">
+          ${kotakAngkaHTML(suaraTidakSah, 3)}
+          <div class="terbilang-mini">(ditulis dengan huruf kapital)</div>
+        </td>
+      </tr>
+      <tr>
+        <td class="center"><b>B</b></td>
+        <td class="center"><b>JUMLAH SELURUH SUARA SAH</b></td>
+        <td></td>
+        <td class="center">
+          ${kotakAngkaHTML(suaraSah, 3)}
+          <div class="terbilang-mini">(ditulis dengan huruf kapital)</div>
+        </td>
+      </tr>
+      <tr>
+        <td class="center"><b>C</b></td>
+        <td class="center"><b>JUMLAH SUARA SAH DAN TIDAK SAH</b></td>
+        <td></td>
+        <td class="center">
+          ${kotakAngkaHTML(totalSahTidakSah, 3)}
+          <div class="terbilang-mini">(ditulis dengan huruf kapital)</div>
+        </td>
+      </tr>
+    </table>
+
+    <table class="ditetapkan">
+      <tr>
+        <td style="width:33%">Ditetapkan di : ${escapeHTML(desa)}</td>
+        <td style="width:33%">Tanggal :</td>
+        <td style="width:33%">2026</td>
+      </tr>
+    </table>
+
+    <div class="ttd-title">NAMA DAN TANDA TANGAN KPPS</div>
+    <table class="ttd">
+      <tr>${kppsCells}</tr>
+    </table>
+
+    <div class="ttd-title">NAMA DAN TANDA TANGAN SAKSI</div>
+    <table class="ttd ttd-saksi">
+      <tr>${saksiCells}</tr>
+    </table>
+
+    <div class="page-no">Halaman 3 dari 3</div>
+  </div>
+</body>
+</html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+  } catch (err: any) {
+    printWindow.close();
+    console.error('Gagal menyiapkan Plano:', err);
+    alert('Gagal menyiapkan Plano: ' + err.message);
+  }
+}
+
+
   // ==========================================
   // FUNGSI HARI H (KEHADIRAN PEMILIH)
   // ==========================================
@@ -4605,6 +5871,7 @@ const dataBelumDitentukanFiltered = useMemo(() => {
     }
     setLoadingHariH(false);
   }
+
 
   async function toggleHadirPemilih(item: any) {
     setLoadingToggleHadir(item.id);
@@ -6206,11 +7473,15 @@ const dataBelumDitentukanFiltered = useMemo(() => {
             <div className="max-w-6xl mx-auto pb-10">
               <div className="mb-6">
                 <h2 className="text-2xl font-black text-slate-900">
-                  Real Count
+                  Perhitungan Cepat / Real Count
                 </h2>
                 <p className="text-sm text-slate-500 font-bold mt-1">
-                  Rekap hasil penghitungan suara real-time dari seluruh TPS.
+                  Rekap cepat hasil penghitungan suara dari seluruh TPS untuk monitoring internal.
                 </p>
+                <div className="mt-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-3 text-xs font-bold">
+                  Data masuk {progresLaporTPS.terinput}/{progresLaporTPS.total} TPS ·
+                  hasil resmi tetap mengikuti dokumen penghitungan TPS yang ditandatangani.
+                </div>
               </div>
 
               {/* PROGRES PELAPORAN */}
@@ -6260,7 +7531,7 @@ const dataBelumDitentukanFiltered = useMemo(() => {
               {/* REKAP TOTAL PER KANDIDAT */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
                 <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide mb-4">
-                  Total Suara Masuk
+                  Rekap Suara Masuk (Sementara)
                 </h3>
                 {rekapTotalPerKandidat.length === 0 ? (
                   <p className="text-sm font-bold text-slate-400 text-center py-4">
@@ -6363,12 +7634,36 @@ const dataBelumDitentukanFiltered = useMemo(() => {
                         </div>
 
                         {(user.role === 'Super Admin' || user.role === 'Admin' || user.role === 'KPPS') && (
-                          <button
-                            onClick={() => bukaInputSuara(row)}
-                            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all"
-                          >
-                            {row.rekap.status === 'Belum Lapor' ? 'Input Hasil' : 'Edit Hasil'}
-                          </button>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => bukaInputSuara(row)}
+                              className="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all"
+                            >
+                              {row.rekap.status === 'Belum Lapor' ? 'Input Hasil' : 'Edit Hasil'}
+                            </button>
+                            <div className="grid grid-cols-1 gap-2">
+                        <button
+                          onClick={() => bukaInputSuara(row)}
+                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all"
+                        >
+                          {row.rekap.status === 'Belum Lapor' ? 'Input Hasil' : 'Edit Hasil'}
+                        </button>
+
+                        <button
+                          onClick={() => cetakC1TPS(row)}
+                          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition-all"
+                        >
+                          C1 / Rekap TPS
+                        </button>
+
+                        <button
+                          onClick={() => cetakPlanoTPS(row)}
+                          className="w-full py-2.5 bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all"
+                        >
+                          Plano 3 Halaman
+                        </button>
+                      </div>
+                          </div>
                         )}
                       </div>
                     );
@@ -11708,15 +13003,15 @@ const dataBelumDitentukanFiltered = useMemo(() => {
                     <label className="block text-xs font-bold text-slate-500 mb-1">
                       Suara Sah
                     </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={modalInputSuara.suara_sah}
-                      onChange={(e) =>
-                        setModalInputSuara({ ...modalInputSuara, suara_sah: e.target.value })
-                      }
-                      className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-emerald-500"
-                    />
+                    <div className="w-full p-3 border-2 border-emerald-100 bg-emerald-50 rounded-xl font-black text-sm text-emerald-700">
+                      {Object.values(modalInputSuara.suara_per_kandidat).reduce(
+                        (total: number, value: any) => total + (Number(value) || 0),
+                        0
+                      )}
+                    </div>
+                    <p className="text-[10px] font-bold text-slate-400 mt-1">
+                      Otomatis dari total suara seluruh kandidat.
+                    </p>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">
