@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx';
 // ==========================================
 const MASTER_MENU = [
   'Dashboard',
+  'Statistik',
   'Tahapan Pilkades',
   'Real Count',
   'Daftar Pemilih',
@@ -388,6 +389,28 @@ export default function Home() {
   const [filterTPS_HariH, setFilterTPS_HariH] = useState('Semua');
   const [loadingToggleHadir, setLoadingToggleHadir] = useState<string | null>(null);
 
+  // ==========================================
+  // STATE STATISTIK
+  // ==========================================
+  const [dataStatistikTPS, setDataStatistikTPS] = useState<any[]>([]);
+  const [loadingStatistikTPS, setLoadingStatistikTPS] = useState(false);
+
+  const [ringkasanStatistik, setRingkasanStatistik] = useState({
+    totalDPT: 0,
+    lakiLaki: 0,
+    perempuan: 0,
+
+    hadir: 0,
+    belumHadir: 0,
+    persenKehadiran: 0,
+
+    suaraSah: 0,
+    suaraTidakSah: 0,
+    totalSuaraMasuk: 0,
+  });
+
+  const [statistikSuaraKandidat, setStatistikSuaraKandidat] = useState<any[]>([]);
+
   // --- STATE PETA TPS ---
   const [leafletSiap, setLeafletSiap] = useState(false);
   const petaRef = useRef<HTMLDivElement>(null);
@@ -612,6 +635,8 @@ export default function Home() {
       fetchStats();
       fetchProgresPerWilayah();
       fetchFunnelData();
+    } else if (activeMenu === 'Statistik') {
+      fetchStatistik();
     } else if (activeMenu === 'Tugas Coklit') {
       fetchTugasCoklit();
       fetchStatistikCoklit();
@@ -723,6 +748,86 @@ export default function Home() {
       supabase.removeChannel(channel);
     };
   }, [activeMenu]);
+
+  // ==========================================
+// REALTIME STATISTIK
+// ==========================================
+useEffect(() => {
+
+  if (activeMenu !== 'Statistik') return;
+
+
+  const refreshStatistik = () => {
+
+    refetchTanpaGeserScroll(() =>
+      latestFetchRef.current.fetchStatistik()
+    );
+
+  };
+
+
+  const channel = supabase
+    .channel('realtime-statistik')
+
+
+    // ======================================
+    // PERUBAHAN DPT / KEHADIRAN
+    // ======================================
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'penduduk',
+      },
+      () => {
+        refreshStatistik();
+      }
+    )
+
+
+    // ======================================
+    // PERUBAHAN SUARA KANDIDAT
+    // ======================================
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'hasil_suara',
+      },
+      () => {
+        refreshStatistik();
+      }
+    )
+
+
+    // ======================================
+    // PERUBAHAN REKAP SUARA TPS
+    // ======================================
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'rekap_suara_tps',
+      },
+      () => {
+        refreshStatistik();
+      }
+    )
+
+
+    .subscribe();
+
+
+  return () => {
+
+    supabase.removeChannel(channel);
+
+  };
+
+}, [activeMenu]);
 
   useEffect(() => {
     if (activeMenu !== 'Hari H') return;
@@ -5476,6 +5581,546 @@ const dataBelumDitentukanFiltered = useMemo(() => {
   }
 
   // ==========================================
+  // FUNGSI STATISTIK
+  // ==========================================
+  async function fetchStatistik() {
+    setLoadingStatistikTPS(true);
+
+    try {
+      const isAdmin =
+        user?.role === 'Super Admin' ||
+        user?.role === 'Admin';
+
+      // Admin / Super Admin = semua TPS
+      // KPPS = hanya TPS penugasannya
+      if (user?.role !== 'KPPS' && !isAdmin) {
+        setDataStatistikTPS([]);
+        return;
+      }
+
+      if (
+        user?.role === 'KPPS' &&
+        !user?.tps_assigned
+      ) {
+        setDataStatistikTPS([]);
+        return;
+      }
+
+
+      // ==========================================
+      // 1. AMBIL SEMUA DATA DPT
+      // ==========================================
+      let semuaDPT: any[] = [];
+
+      let dariBaris = 0;
+
+      const ukuranHalaman = 1000;
+
+
+      while (true) {
+        let queryDPT = supabase
+          .from('penduduk')
+          .select(
+            'TPS, KELAMIN, sudah_hadir_tps'
+          )
+          .eq(
+            'status_dpt',
+            'DPT'
+          );
+
+
+        // Kalau login KPPS, hanya TPS dia
+        if (user?.role === 'KPPS') {
+          queryDPT = queryDPT.eq(
+            'TPS',
+            user.tps_assigned
+          );
+        }
+
+
+        const {
+          data,
+          error,
+        } = await queryDPT.range(
+          dariBaris,
+          dariBaris + ukuranHalaman - 1
+        );
+
+
+        if (error) {
+          throw error;
+        }
+
+
+        if (
+          !data ||
+          data.length === 0
+        ) {
+          break;
+        }
+
+
+        semuaDPT =
+          semuaDPT.concat(data);
+
+
+        if (
+          data.length <
+          ukuranHalaman
+        ) {
+          break;
+        }
+
+
+        dariBaris +=
+          ukuranHalaman;
+      }
+
+
+      // ==========================================
+      // 2. AMBIL MASTER TPS
+      // ==========================================
+      let queryTPS = supabase
+        .from('tps')
+        .select('*')
+        .order(
+          'nomor_tps',
+          {
+            ascending: true,
+          }
+        );
+
+
+      if (user?.role === 'KPPS') {
+        queryTPS = queryTPS.eq(
+          'nomor_tps',
+          user.tps_assigned
+        );
+      }
+
+
+      const {
+        data: semuaTPS,
+        error: errorTPS,
+      } = await queryTPS;
+
+
+      if (errorTPS) {
+        throw errorTPS;
+      }
+
+
+      // ==========================================
+      // 3. AMBIL MASTER KANDIDAT
+      // ==========================================
+      const {
+        data: semuaKandidat,
+        error: errorKandidat,
+      } = await supabase
+        .from('kandidat')
+        .select('*')
+        .order(
+          'nomor_urut',
+          {
+            ascending: true,
+          }
+        );
+
+
+      if (errorKandidat) {
+        throw errorKandidat;
+      }
+
+
+      const daftarTPSId =
+        (semuaTPS || []).map(
+          (t) => t.id
+        );
+
+
+      // ==========================================
+      // 4. AMBIL HASIL SUARA + REKAP TPS
+      // ==========================================
+      let semuaSuara: any[] = [];
+
+      let semuaRekap: any[] = [];
+
+
+      if (
+        daftarTPSId.length > 0
+      ) {
+        const [
+          suaraRes,
+          rekapRes,
+        ] = await Promise.all([
+          supabase
+            .from('hasil_suara')
+            .select('*')
+            .in(
+              'tps_id',
+              daftarTPSId
+            ),
+
+          supabase
+            .from('rekap_suara_tps')
+            .select('*')
+            .in(
+              'tps_id',
+              daftarTPSId
+            ),
+        ]);
+
+
+        if (suaraRes.error) {
+          throw suaraRes.error;
+        }
+
+
+        if (rekapRes.error) {
+          throw rekapRes.error;
+        }
+
+
+        semuaSuara =
+          suaraRes.data || [];
+
+        semuaRekap =
+          rekapRes.data || [];
+      }
+
+
+      // ==========================================
+      // 5. SUSUN STATISTIK PER TPS
+      // ==========================================
+      const hasilPerTPS =
+        (semuaTPS || []).map(
+          (tps) => {
+
+            const nomorTPS =
+              String(
+                tps.nomor_tps || ''
+              )
+                .trim()
+                .padStart(
+                  2,
+                  '0'
+                );
+
+
+            const dptTPS =
+              semuaDPT.filter(
+                (item) =>
+                  String(
+                    item.TPS || ''
+                  )
+                    .trim()
+                    .padStart(
+                      2,
+                      '0'
+                    ) === nomorTPS
+              );
+
+
+            const totalDPT =
+              dptTPS.length;
+
+
+            const lakiLaki =
+              dptTPS.filter(
+                (item) =>
+                  item.KELAMIN === 'L'
+              ).length;
+
+
+            const perempuan =
+              dptTPS.filter(
+                (item) =>
+                  item.KELAMIN === 'P'
+              ).length;
+
+
+            const hadir =
+              dptTPS.filter(
+                (item) =>
+                  item.sudah_hadir_tps ===
+                  true
+              ).length;
+
+
+            const belumHadir =
+              Math.max(
+                0,
+                totalDPT - hadir
+              );
+
+
+            const persenKehadiran =
+              totalDPT > 0
+                ? Math.round(
+                    (hadir /
+                      totalDPT) *
+                      100
+                  )
+                : 0;
+
+
+            // =====================================
+            // REAL COUNT TPS
+            // =====================================
+            const rekapTPS =
+              semuaRekap.find(
+                (r) =>
+                  r.tps_id ===
+                  tps.id
+              );
+
+
+            const suaraPerKandidat =
+              (semuaKandidat || []).map(
+                (kandidat) => {
+
+                  const suara =
+                    semuaSuara.find(
+                      (s) =>
+                        s.tps_id ===
+                          tps.id &&
+                        s.kandidat_id ===
+                          kandidat.id
+                    );
+
+
+                  return {
+                    kandidat,
+                    jumlah:
+                      Number(
+                        suara?.jumlah_suara
+                      ) || 0,
+                  };
+                }
+              );
+
+
+            const suaraSah =
+              Number(
+                rekapTPS?.suara_sah
+              ) || 0;
+
+
+            const suaraTidakSah =
+              Number(
+                rekapTPS?.suara_tidak_sah
+              ) || 0;
+
+
+            const totalSuaraMasuk =
+              suaraSah +
+              suaraTidakSah;
+
+
+            return {
+              tps: nomorTPS,
+
+              namaLokasi:
+                tps.nama_lokasi || '-',
+
+              totalDPT,
+
+              lakiLaki,
+
+              perempuan,
+
+              hadir,
+
+              belumHadir,
+
+              persenKehadiran,
+
+              suaraSah,
+
+              suaraTidakSah,
+
+              totalSuaraMasuk,
+
+              statusRealCount:
+                rekapTPS?.status ||
+                'Belum Lapor',
+
+              suaraPerKandidat,
+            };
+          }
+        );
+
+
+      setDataStatistikTPS(
+        hasilPerTPS
+      );
+
+
+      // ==========================================
+      // 6. RINGKASAN TOTAL DESA
+      // ==========================================
+      const totalDPT =
+        hasilPerTPS.reduce(
+          (total, row) =>
+            total + row.totalDPT,
+          0
+        );
+
+
+      const totalLakiLaki =
+        hasilPerTPS.reduce(
+          (total, row) =>
+            total + row.lakiLaki,
+          0
+        );
+
+
+      const totalPerempuan =
+        hasilPerTPS.reduce(
+          (total, row) =>
+            total + row.perempuan,
+          0
+        );
+
+
+      const totalHadir =
+        hasilPerTPS.reduce(
+          (total, row) =>
+            total + row.hadir,
+          0
+        );
+
+
+      const totalSuaraSah =
+        hasilPerTPS.reduce(
+          (total, row) =>
+            total + row.suaraSah,
+          0
+        );
+
+
+      const totalSuaraTidakSah =
+        hasilPerTPS.reduce(
+          (total, row) =>
+            total +
+            row.suaraTidakSah,
+          0
+        );
+
+
+      setRingkasanStatistik({
+        totalDPT,
+
+        lakiLaki:
+          totalLakiLaki,
+
+        perempuan:
+          totalPerempuan,
+
+        hadir:
+          totalHadir,
+
+        belumHadir:
+          Math.max(
+            0,
+            totalDPT -
+              totalHadir
+          ),
+
+        persenKehadiran:
+          totalDPT > 0
+            ? Math.round(
+                (totalHadir /
+                  totalDPT) *
+                  100
+              )
+            : 0,
+
+        suaraSah:
+          totalSuaraSah,
+
+        suaraTidakSah:
+          totalSuaraTidakSah,
+
+        totalSuaraMasuk:
+          totalSuaraSah +
+          totalSuaraTidakSah,
+      });
+
+
+      // ==========================================
+      // 7. TOTAL SUARA PER KANDIDAT
+      // ==========================================
+      const hasilKandidat =
+        (semuaKandidat || []).map(
+          (kandidat) => {
+
+            const totalSuara =
+              semuaSuara
+                .filter(
+                  (s) =>
+                    s.kandidat_id ===
+                    kandidat.id
+                )
+                .reduce(
+                  (
+                    total,
+                    item
+                  ) =>
+                    total +
+                    (
+                      Number(
+                        item.jumlah_suara
+                      ) || 0
+                    ),
+                  0
+                );
+
+
+            return {
+              id:
+                kandidat.id,
+
+              nomorUrut:
+                kandidat.nomor_urut,
+
+              nama:
+                kandidat.nama,
+
+              foto:
+                kandidat.foto_url,
+
+              totalSuara,
+            };
+          }
+        );
+
+
+      setStatistikSuaraKandidat(
+        hasilKandidat
+      );
+
+    } catch (err: any) {
+
+      console.error(
+        'Error Statistik:',
+        err
+      );
+
+      alert(
+        'Gagal mengambil data statistik: ' +
+          err.message
+      );
+
+    } finally {
+
+      setLoadingStatistikTPS(
+        false
+      );
+    }
+  }
+
+  // ==========================================
   // FUNGSI REAL COUNT
   // ==========================================
   async function fetchRealCount() {
@@ -7620,6 +8265,7 @@ async function cetakPlanoTPS(row: any) {
     fetchRealCount,
     fetchHariH,
     fetchRekapKehadiranTPS,
+    fetchStatistik,
   };
 
   // ==========================================
@@ -11372,6 +12018,1284 @@ async function cetakPlanoTPS(row: any) {
           {/* ======================================================== */}
           {/* KONTEN MENU LAINNYA (DASHBOARD & PENGATURAN TETAP) */}
           {/* ======================================================== */}
+
+
+{/* ======================================================== */}
+{/* STATISTIK */}
+{/* ======================================================== */}
+{activeMenu === 'Statistik' && (
+  <div className="max-w-6xl mx-auto pb-10">
+
+    {/* HEADER */}
+    <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <h2 className="text-2xl font-black text-slate-900">
+          Statistik Pilkades
+        </h2>
+
+        <p className="text-sm text-slate-500 font-bold mt-1">
+          Rekap DPT, kehadiran pemilih dan hasil penghitungan suara per TPS.
+        </p>
+      </div>
+
+      <button
+        onClick={() => fetchStatistik()}
+        disabled={loadingStatistikTPS}
+        className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-black shadow-sm transition"
+      >
+        {loadingStatistikTPS
+          ? 'Memuat...'
+          : '↻ Refresh Statistik'}
+      </button>
+    </div>
+
+
+    {/* LOADING */}
+    {loadingStatistikTPS && (
+      <div className="mb-6 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-sm font-bold text-indigo-700">
+        Mengambil data statistik...
+      </div>
+    )}
+
+
+    {/* ==================================================== */}
+    {/* KARTU RINGKASAN */}
+    {/* ==================================================== */}
+    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
+
+      {/* TOTAL DPT */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-xl mb-4">
+          👥
+        </div>
+
+        <p className="text-xs font-black text-slate-500 uppercase tracking-wide">
+          Total DPT
+        </p>
+
+        <p className="text-3xl font-black text-slate-900 mt-1">
+          {ringkasanStatistik.totalDPT.toLocaleString('id-ID')}
+        </p>
+
+        <p className="text-xs text-slate-400 font-bold mt-2">
+          Pemilih tetap
+        </p>
+      </div>
+
+
+      {/* LAKI-LAKI */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-xl mb-4">
+          👨
+        </div>
+
+        <p className="text-xs font-black text-slate-500 uppercase tracking-wide">
+          Laki-laki
+        </p>
+
+        <p className="text-3xl font-black text-blue-600 mt-1">
+          {ringkasanStatistik.lakiLaki.toLocaleString('id-ID')}
+        </p>
+
+        <p className="text-xs text-slate-400 font-bold mt-2">
+          DPT laki-laki
+        </p>
+      </div>
+
+
+      {/* PEREMPUAN */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-pink-100 flex items-center justify-center text-xl mb-4">
+          👩
+        </div>
+
+        <p className="text-xs font-black text-slate-500 uppercase tracking-wide">
+          Perempuan
+        </p>
+
+        <p className="text-3xl font-black text-pink-600 mt-1">
+          {ringkasanStatistik.perempuan.toLocaleString('id-ID')}
+        </p>
+
+        <p className="text-xs text-slate-400 font-bold mt-2">
+          DPT perempuan
+        </p>
+      </div>
+
+
+      {/* SUDAH HADIR */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-xl mb-4">
+          ✓
+        </div>
+
+        <p className="text-xs font-black text-slate-500 uppercase tracking-wide">
+          Sudah Hadir
+        </p>
+
+        <p className="text-3xl font-black text-emerald-600 mt-1">
+          {ringkasanStatistik.hadir.toLocaleString('id-ID')}
+        </p>
+
+        <p className="text-xs text-slate-400 font-bold mt-2">
+          Pemilih hadir
+        </p>
+      </div>
+
+
+      {/* BELUM HADIR */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center text-xl mb-4">
+          ⏳
+        </div>
+
+        <p className="text-xs font-black text-slate-500 uppercase tracking-wide">
+          Belum Hadir
+        </p>
+
+        <p className="text-3xl font-black text-orange-600 mt-1">
+          {ringkasanStatistik.belumHadir.toLocaleString('id-ID')}
+        </p>
+
+        <p className="text-xs text-slate-400 font-bold mt-2">
+          Dari total DPT
+        </p>
+      </div>
+
+
+      {/* PERSENTASE KEHADIRAN */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center text-xl mb-4">
+          📊
+        </div>
+
+        <p className="text-xs font-black text-slate-500 uppercase tracking-wide">
+          Kehadiran
+        </p>
+
+        <p className="text-3xl font-black text-violet-600 mt-1">
+          {ringkasanStatistik.persenKehadiran}%
+        </p>
+
+        <div className="mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-violet-500 rounded-full transition-all duration-500"
+            style={{
+              width: `${Math.min(
+                100,
+                ringkasanStatistik.persenKehadiran
+              )}%`,
+            }}
+          />
+        </div>
+      </div>
+
+    </div>
+
+
+    {/* ==================================================== */}
+{/* GRAFIK KEHADIRAN PER TPS */}
+{/* ==================================================== */}
+<div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 md:p-6 mb-6">
+
+  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-6">
+    <div>
+      <h3 className="text-lg font-black text-slate-900">
+        Kehadiran Pemilih per TPS
+      </h3>
+
+      <p className="text-xs font-bold text-slate-400 mt-1">
+        Perbandingan jumlah pemilih yang sudah hadir dengan total DPT masing-masing TPS.
+      </p>
+    </div>
+
+    <div className="flex items-center gap-4 text-xs font-black">
+      <div className="flex items-center gap-2">
+        <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
+        <span className="text-slate-500">
+          Hadir
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="w-3 h-3 rounded-full bg-slate-200"></span>
+        <span className="text-slate-500">
+          Belum Hadir
+        </span>
+      </div>
+    </div>
+  </div>
+
+
+  {dataStatistikTPS.length === 0 ? (
+    <div className="py-10 text-center">
+      <p className="text-sm font-bold text-slate-400">
+        Belum ada data statistik TPS.
+      </p>
+    </div>
+  ) : (
+    <div className="space-y-5">
+
+      {dataStatistikTPS.map((row) => (
+
+        <div
+          key={row.tps}
+          className="grid grid-cols-[65px_1fr_80px] md:grid-cols-[80px_1fr_100px] gap-3 items-center"
+        >
+
+          {/* NAMA TPS */}
+          <div>
+            <p className="text-sm font-black text-slate-800">
+              TPS {row.tps}
+            </p>
+
+            <p className="text-[10px] font-bold text-slate-400">
+              {row.totalDPT} DPT
+            </p>
+          </div>
+
+
+          {/* PROGRESS BAR */}
+          <div>
+            <div className="h-5 bg-slate-100 rounded-full overflow-hidden relative">
+
+              <div
+                className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    row.persenKehadiran
+                  )}%`,
+                }}
+              />
+
+            </div>
+
+            <div className="flex justify-between mt-1">
+
+              <span className="text-[10px] font-bold text-emerald-600">
+                {row.hadir} hadir
+              </span>
+
+              <span className="text-[10px] font-bold text-slate-400">
+                {row.belumHadir} belum
+              </span>
+
+            </div>
+          </div>
+
+
+          {/* PERSENTASE */}
+          <div className="text-right">
+
+            <p className="text-lg font-black text-emerald-600">
+              {row.persenKehadiran}%
+            </p>
+
+            <p className="text-[10px] font-bold text-slate-400">
+              Kehadiran
+            </p>
+
+          </div>
+
+        </div>
+
+      ))}
+
+    </div>
+  )}
+
+</div>
+
+
+
+{/* ==================================================== */}
+{/* TABEL DAFTAR HADIR PER TPS */}
+{/* ==================================================== */}
+<div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6">
+
+  {/* HEADER */}
+  <div className="p-5 md:p-6 border-b border-slate-100">
+
+    <h3 className="text-lg font-black text-slate-900">
+      Daftar Hadir per TPS
+    </h3>
+
+    <p className="text-xs font-bold text-slate-400 mt-1">
+      Rekap jumlah DPT, pemilih hadir dan pemilih yang belum hadir.
+    </p>
+
+  </div>
+
+
+  {/* TABLE */}
+  <div className="overflow-x-auto">
+
+    <table className="w-full text-sm">
+
+      <thead className="bg-slate-50">
+
+        <tr className="text-xs uppercase tracking-wide text-slate-500">
+
+          <th className="px-5 py-4 text-left font-black">
+            TPS
+          </th>
+
+          <th className="px-5 py-4 text-center font-black">
+            DPT
+          </th>
+
+          <th className="px-5 py-4 text-center font-black">
+            Hadir
+          </th>
+
+          <th className="px-5 py-4 text-center font-black">
+            Belum Hadir
+          </th>
+
+          <th className="px-5 py-4 text-center font-black">
+            Kehadiran
+          </th>
+
+          <th className="px-5 py-4 text-left font-black min-w-[180px]">
+            Progres
+          </th>
+
+        </tr>
+
+      </thead>
+
+
+      <tbody className="divide-y divide-slate-100">
+
+        {dataStatistikTPS.length === 0 ? (
+
+          <tr>
+
+            <td
+              colSpan={6}
+              className="px-5 py-10 text-center text-slate-400 font-bold"
+            >
+              Belum ada data statistik.
+            </td>
+
+          </tr>
+
+        ) : (
+
+          dataStatistikTPS.map((row) => (
+
+            <tr
+              key={row.tps}
+              className="hover:bg-slate-50 transition"
+            >
+
+              {/* TPS */}
+              <td className="px-5 py-4">
+
+                <p className="font-black text-slate-800">
+                  TPS {row.tps}
+                </p>
+
+                {row.namaLokasi && row.namaLokasi !== '-' && (
+                  <p className="text-[10px] font-bold text-slate-400 mt-1">
+                    {row.namaLokasi}
+                  </p>
+                )}
+
+              </td>
+
+
+              {/* DPT */}
+              <td className="px-5 py-4 text-center">
+
+                <span className="font-black text-slate-800">
+                  {row.totalDPT.toLocaleString('id-ID')}
+                </span>
+
+              </td>
+
+
+              {/* HADIR */}
+              <td className="px-5 py-4 text-center">
+
+                <span className="inline-flex px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 font-black">
+                  {row.hadir.toLocaleString('id-ID')}
+                </span>
+
+              </td>
+
+
+              {/* BELUM HADIR */}
+              <td className="px-5 py-4 text-center">
+
+                <span className="inline-flex px-3 py-1 rounded-full bg-orange-50 text-orange-700 font-black">
+                  {row.belumHadir.toLocaleString('id-ID')}
+                </span>
+
+              </td>
+
+
+              {/* PERSENTASE */}
+              <td className="px-5 py-4 text-center">
+
+                <span
+                  className={`inline-flex px-3 py-1 rounded-full font-black ${
+                    row.persenKehadiran >= 75
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : row.persenKehadiran >= 50
+                      ? 'bg-amber-50 text-amber-700'
+                      : 'bg-red-50 text-red-700'
+                  }`}
+                >
+                  {row.persenKehadiran}%
+                </span>
+
+              </td>
+
+
+              {/* PROGRESS */}
+              <td className="px-5 py-4">
+
+                <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+
+                  <div
+                    className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        row.persenKehadiran
+                      )}%`,
+                    }}
+                  />
+
+                </div>
+
+              </td>
+
+            </tr>
+
+          ))
+
+        )}
+
+      </tbody>
+
+    </table>
+
+  </div>
+
+</div>
+
+
+  {/* ==================================================== */}
+{/* DPT LAKI-LAKI / PEREMPUAN PER TPS */}
+{/* ==================================================== */}
+<div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 md:p-6 mb-6">
+
+  {/* HEADER */}
+  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+
+    <div>
+      <h3 className="text-lg font-black text-slate-900">
+        Komposisi DPT per TPS
+      </h3>
+
+      <p className="text-xs font-bold text-slate-400 mt-1">
+        Perbandingan jumlah pemilih laki-laki dan perempuan pada setiap TPS.
+      </p>
+    </div>
+
+
+    {/* LEGENDA */}
+    <div className="flex items-center gap-4 text-xs font-black">
+
+      <div className="flex items-center gap-2">
+        <span className="w-3 h-3 rounded-full bg-blue-500"></span>
+        <span className="text-slate-500">
+          Laki-laki
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="w-3 h-3 rounded-full bg-pink-500"></span>
+        <span className="text-slate-500">
+          Perempuan
+        </span>
+      </div>
+
+    </div>
+
+  </div>
+
+
+  {/* GRAFIK */}
+  {dataStatistikTPS.length === 0 ? (
+
+    <div className="py-10 text-center">
+
+      <p className="text-sm font-bold text-slate-400">
+        Belum ada data DPT per TPS.
+      </p>
+
+    </div>
+
+  ) : (
+
+    <div className="space-y-5">
+
+      {dataStatistikTPS.map((row) => {
+
+        const persenLaki =
+          row.totalDPT > 0
+            ? (row.lakiLaki / row.totalDPT) * 100
+            : 0;
+
+        const persenPerempuan =
+          row.totalDPT > 0
+            ? (row.perempuan / row.totalDPT) * 100
+            : 0;
+
+        return (
+
+          <div
+            key={`gender-${row.tps}`}
+            className="grid grid-cols-[65px_1fr] md:grid-cols-[80px_1fr_180px] gap-3 items-center"
+          >
+
+            {/* TPS */}
+            <div>
+
+              <p className="text-sm font-black text-slate-800">
+                TPS {row.tps}
+              </p>
+
+              <p className="text-[10px] font-bold text-slate-400">
+                {row.totalDPT} DPT
+              </p>
+
+            </div>
+
+
+            {/* STACKED BAR */}
+            <div>
+
+              <div className="h-6 w-full bg-slate-100 rounded-full overflow-hidden flex">
+
+                {/* LAKI-LAKI */}
+                <div
+                  className="h-full bg-blue-500 transition-all duration-500"
+                  style={{
+                    width: `${persenLaki}%`,
+                  }}
+                />
+
+
+                {/* PEREMPUAN */}
+                <div
+                  className="h-full bg-pink-500 transition-all duration-500"
+                  style={{
+                    width: `${persenPerempuan}%`,
+                  }}
+                />
+
+              </div>
+
+
+              {/* ANGKA MOBILE */}
+              <div className="flex justify-between mt-1 md:hidden">
+
+                <span className="text-[10px] font-bold text-blue-600">
+                  L {row.lakiLaki}
+                </span>
+
+                <span className="text-[10px] font-bold text-pink-600">
+                  P {row.perempuan}
+                </span>
+
+              </div>
+
+            </div>
+
+
+            {/* ANGKA DESKTOP */}
+            <div className="hidden md:flex items-center justify-end gap-4">
+
+              <div className="text-right">
+
+                <p className="text-sm font-black text-blue-600">
+                  {row.lakiLaki}
+                </p>
+
+                <p className="text-[10px] font-bold text-slate-400">
+                  Laki-laki
+                </p>
+
+              </div>
+
+
+              <div className="w-px h-8 bg-slate-200"></div>
+
+
+              <div className="text-right">
+
+                <p className="text-sm font-black text-pink-600">
+                  {row.perempuan}
+                </p>
+
+                <p className="text-[10px] font-bold text-slate-400">
+                  Perempuan
+                </p>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        );
+      })}
+
+    </div>
+
+    )}
+
+</div>
+
+{/* ==================================================== */}
+{/* TABEL DPT PER TPS */}
+{/* ==================================================== */}
+<div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6">
+
+  <div className="p-5 md:p-6 border-b border-slate-100">
+
+    <h3 className="text-lg font-black text-slate-900">
+      Rekap DPT per TPS
+    </h3>
+
+    <p className="text-xs font-bold text-slate-400 mt-1">
+      Jumlah DPT laki-laki dan perempuan pada masing-masing TPS.
+    </p>
+
+  </div>
+
+
+  <div className="overflow-x-auto">
+
+    <table className="w-full text-sm">
+
+      <thead className="bg-slate-50">
+
+        <tr className="text-xs uppercase tracking-wide text-slate-500">
+
+          <th className="px-5 py-4 text-left font-black">
+            TPS
+          </th>
+
+          <th className="px-5 py-4 text-center font-black">
+            Laki-laki
+          </th>
+
+          <th className="px-5 py-4 text-center font-black">
+            Perempuan
+          </th>
+
+          <th className="px-5 py-4 text-center font-black">
+            Total DPT
+          </th>
+
+          <th className="px-5 py-4 text-center font-black">
+            % L
+          </th>
+
+          <th className="px-5 py-4 text-center font-black">
+            % P
+          </th>
+
+        </tr>
+
+      </thead>
+
+
+      <tbody className="divide-y divide-slate-100">
+
+        {dataStatistikTPS.map((row) => {
+
+          const persenLaki =
+            row.totalDPT > 0
+              ? Math.round(
+                  (row.lakiLaki / row.totalDPT) * 100
+                )
+              : 0;
+
+          const persenPerempuan =
+            row.totalDPT > 0
+              ? Math.round(
+                  (row.perempuan / row.totalDPT) * 100
+                )
+              : 0;
+
+          return (
+
+            <tr
+              key={`dpt-${row.tps}`}
+              className="hover:bg-slate-50 transition"
+            >
+
+              {/* TPS */}
+              <td className="px-5 py-4">
+
+                <p className="font-black text-slate-800">
+                  TPS {row.tps}
+                </p>
+
+                {row.namaLokasi &&
+                  row.namaLokasi !== '-' && (
+
+                    <p className="text-[10px] font-bold text-slate-400 mt-1">
+                      {row.namaLokasi}
+                    </p>
+
+                  )}
+
+              </td>
+
+
+              {/* L */}
+              <td className="px-5 py-4 text-center">
+
+                <span className="inline-flex px-3 py-1 rounded-full bg-blue-50 text-blue-700 font-black">
+                  {row.lakiLaki.toLocaleString('id-ID')}
+                </span>
+
+              </td>
+
+
+              {/* P */}
+              <td className="px-5 py-4 text-center">
+
+                <span className="inline-flex px-3 py-1 rounded-full bg-pink-50 text-pink-700 font-black">
+                  {row.perempuan.toLocaleString('id-ID')}
+                </span>
+
+              </td>
+
+
+              {/* TOTAL */}
+              <td className="px-5 py-4 text-center">
+
+                <span className="font-black text-slate-900">
+                  {row.totalDPT.toLocaleString('id-ID')}
+                </span>
+
+              </td>
+
+
+              {/* PERSEN L */}
+              <td className="px-5 py-4 text-center">
+
+                <span className="text-blue-600 font-black">
+                  {persenLaki}%
+                </span>
+
+              </td>
+
+
+              {/* PERSEN P */}
+              <td className="px-5 py-4 text-center">
+
+                <span className="text-pink-600 font-black">
+                  {persenPerempuan}%
+                </span>
+
+              </td>
+
+            </tr>
+
+          );
+
+        })}
+
+      </tbody>
+
+
+      {/* TOTAL DESA */}
+      <tfoot className="bg-slate-900 text-white">
+
+        <tr>
+
+          <td className="px-5 py-4 font-black">
+            TOTAL
+          </td>
+
+          <td className="px-5 py-4 text-center font-black">
+            {ringkasanStatistik.lakiLaki.toLocaleString('id-ID')}
+          </td>
+
+          <td className="px-5 py-4 text-center font-black">
+            {ringkasanStatistik.perempuan.toLocaleString('id-ID')}
+          </td>
+
+          <td className="px-5 py-4 text-center font-black">
+            {ringkasanStatistik.totalDPT.toLocaleString('id-ID')}
+          </td>
+
+          <td className="px-5 py-4 text-center font-black">
+            {ringkasanStatistik.totalDPT > 0
+              ? Math.round(
+                  (
+                    ringkasanStatistik.lakiLaki /
+                    ringkasanStatistik.totalDPT
+                  ) * 100
+                )
+              : 0}
+            %
+          </td>
+
+          <td className="px-5 py-4 text-center font-black">
+            {ringkasanStatistik.totalDPT > 0
+              ? Math.round(
+                  (
+                    ringkasanStatistik.perempuan /
+                    ringkasanStatistik.totalDPT
+                  ) * 100
+                )
+              : 0}
+            %
+          </td>
+
+        </tr>
+
+      </tfoot>
+
+    </table>
+
+  </div>
+
+</div>
+
+{/* ==================================================== */}
+{/* REAL COUNT STATISTIK */}
+{/* ==================================================== */}
+<div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 md:p-6 mb-6">
+
+  {/* HEADER */}
+  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+
+    <div>
+      <h3 className="text-lg font-black text-slate-900">
+        Real Count
+      </h3>
+
+      <p className="text-xs font-bold text-slate-400 mt-1">
+        Rekap sementara perolehan suara berdasarkan data yang telah masuk dari TPS.
+      </p>
+    </div>
+
+    <div className="px-3 py-2 rounded-xl bg-indigo-50 border border-indigo-100">
+
+      <p className="text-[10px] font-black uppercase text-indigo-500">
+        Total Suara Masuk
+      </p>
+
+      <p className="text-lg font-black text-indigo-700">
+        {ringkasanStatistik.totalSuaraMasuk.toLocaleString('id-ID')}
+      </p>
+
+    </div>
+
+  </div>
+
+
+  {/* ================================================== */}
+  {/* RINGKASAN SUARA */}
+  {/* ================================================== */}
+  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-7">
+
+    {/* SUARA SAH */}
+    <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4">
+
+      <p className="text-[10px] uppercase font-black text-emerald-600">
+        Suara Sah
+      </p>
+
+      <p className="text-2xl font-black text-emerald-700 mt-1">
+        {ringkasanStatistik.suaraSah.toLocaleString('id-ID')}
+      </p>
+
+    </div>
+
+
+    {/* TIDAK SAH */}
+    <div className="rounded-xl bg-red-50 border border-red-100 p-4">
+
+      <p className="text-[10px] uppercase font-black text-red-600">
+        Tidak Sah
+      </p>
+
+      <p className="text-2xl font-black text-red-700 mt-1">
+        {ringkasanStatistik.suaraTidakSah.toLocaleString('id-ID')}
+      </p>
+
+    </div>
+
+
+    {/* TOTAL */}
+    <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+
+      <p className="text-[10px] uppercase font-black text-slate-500">
+        Total Surat Suara
+      </p>
+
+      <p className="text-2xl font-black text-slate-800 mt-1">
+        {ringkasanStatistik.totalSuaraMasuk.toLocaleString('id-ID')}
+      </p>
+
+    </div>
+
+  </div>
+
+
+  {/* ================================================== */}
+  {/* GRAFIK SUARA KANDIDAT */}
+  {/* ================================================== */}
+  <div>
+
+    <h4 className="text-sm font-black text-slate-700 uppercase tracking-wide mb-4">
+      Perolehan Suara Kandidat
+    </h4>
+
+
+    {statistikSuaraKandidat.length === 0 ? (
+
+      <div className="py-8 text-center text-sm font-bold text-slate-400">
+        Belum ada data hasil suara.
+      </div>
+
+    ) : (
+
+      <div className="space-y-5">
+
+        {(() => {
+
+          const totalSuaraKandidat =
+            statistikSuaraKandidat.reduce(
+              (total, kandidat) =>
+                total + Number(kandidat.totalSuara || 0),
+              0
+            );
+
+          return statistikSuaraKandidat.map((kandidat) => {
+
+            const persen =
+              totalSuaraKandidat > 0
+                ? (
+                    Number(kandidat.totalSuara || 0) /
+                    totalSuaraKandidat
+                  ) * 100
+                : 0;
+
+
+            return (
+
+              <div key={kandidat.id}>
+
+                {/* LABEL */}
+                <div className="flex items-center justify-between gap-4 mb-2">
+
+                  <div className="min-w-0">
+
+                    <p className="text-sm font-black text-slate-800 truncate">
+                      No. {kandidat.nomorUrut} · {kandidat.nama}
+                    </p>
+
+                  </div>
+
+
+                  <div className="text-right whitespace-nowrap">
+
+                    <p className="text-sm font-black text-slate-900">
+                      {Number(kandidat.totalSuara || 0).toLocaleString('id-ID')}
+                      {' '}suara
+                    </p>
+
+                    <p className="text-[10px] font-black text-indigo-600">
+                      {persen.toFixed(1)}%
+                    </p>
+
+                  </div>
+
+                </div>
+
+
+                {/* BAR */}
+                <div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden">
+
+                  <div
+                    className="h-full bg-indigo-600 rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.min(100, persen)}%`,
+                    }}
+                  />
+
+                </div>
+
+              </div>
+
+            );
+
+          });
+
+        })()}
+
+      </div>
+
+    )}
+
+  </div>
+
+</div>
+
+{/* ==================================================== */}
+{/* REAL COUNT PER TPS */}
+{/* ==================================================== */}
+<div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6">
+
+  {/* HEADER */}
+  <div className="p-5 md:p-6 border-b border-slate-100">
+
+    <h3 className="text-lg font-black text-slate-900">
+      Real Count per TPS
+    </h3>
+
+    <p className="text-xs font-bold text-slate-400 mt-1">
+      Rincian suara kandidat, suara sah, tidak sah dan status laporan setiap TPS.
+    </p>
+
+  </div>
+
+
+  <div className="overflow-x-auto">
+
+    <table className="w-full text-sm">
+
+      <thead className="bg-slate-50">
+
+        <tr className="text-xs uppercase tracking-wide text-slate-500">
+
+          <th className="px-4 py-4 text-left font-black">
+            TPS
+          </th>
+
+
+          {/* KOLOM KANDIDAT DINAMIS */}
+          {statistikSuaraKandidat.map((kandidat) => (
+
+            <th
+              key={`header-kandidat-${kandidat.id}`}
+              className="px-4 py-4 text-center font-black whitespace-nowrap"
+            >
+              No. {kandidat.nomorUrut}
+              <div className="normal-case text-[10px] text-slate-400 mt-1 max-w-[120px] truncate">
+                {kandidat.nama}
+              </div>
+            </th>
+
+          ))}
+
+
+          <th className="px-4 py-4 text-center font-black">
+            Sah
+          </th>
+
+          <th className="px-4 py-4 text-center font-black">
+            Tidak Sah
+          </th>
+
+          <th className="px-4 py-4 text-center font-black">
+            Total
+          </th>
+
+          <th className="px-4 py-4 text-center font-black">
+            Status
+          </th>
+
+        </tr>
+
+      </thead>
+
+
+      <tbody className="divide-y divide-slate-100">
+
+        {dataStatistikTPS.length === 0 ? (
+
+          <tr>
+
+            <td
+              colSpan={statistikSuaraKandidat.length + 5}
+              className="px-5 py-10 text-center text-slate-400 font-bold"
+            >
+              Belum ada data Real Count.
+            </td>
+
+          </tr>
+
+        ) : (
+
+          dataStatistikTPS.map((row) => (
+
+            <tr
+              key={`real-count-${row.tps}`}
+              className="hover:bg-slate-50 transition"
+            >
+
+              {/* TPS */}
+              <td className="px-4 py-4">
+
+                <p className="font-black text-slate-800 whitespace-nowrap">
+                  TPS {row.tps}
+                </p>
+
+                {row.namaLokasi &&
+                  row.namaLokasi !== '-' && (
+
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">
+                      {row.namaLokasi}
+                    </p>
+
+                  )}
+
+              </td>
+
+
+              {/* SUARA KANDIDAT */}
+              {row.suaraPerKandidat.map((sp: any) => (
+
+                <td
+                  key={`${row.tps}-${sp.kandidat.id}`}
+                  className="px-4 py-4 text-center"
+                >
+
+                  <span className="font-black text-slate-800">
+                    {Number(sp.jumlah || 0).toLocaleString('id-ID')}
+                  </span>
+
+                </td>
+
+              ))}
+
+
+              {/* SAH */}
+              <td className="px-4 py-4 text-center">
+
+                <span className="font-black text-emerald-600">
+                  {Number(row.suaraSah || 0).toLocaleString('id-ID')}
+                </span>
+
+              </td>
+
+
+              {/* TIDAK SAH */}
+              <td className="px-4 py-4 text-center">
+
+                <span className="font-black text-red-600">
+                  {Number(row.suaraTidakSah || 0).toLocaleString('id-ID')}
+                </span>
+
+              </td>
+
+
+              {/* TOTAL */}
+              <td className="px-4 py-4 text-center">
+
+                <span className="font-black text-slate-900">
+                  {Number(row.totalSuaraMasuk || 0).toLocaleString('id-ID')}
+                </span>
+
+              </td>
+
+
+              {/* STATUS */}
+              <td className="px-4 py-4 text-center">
+
+                <span
+                  className={`inline-flex px-3 py-1 rounded-full border text-[10px] font-black whitespace-nowrap ${
+                    row.statusRealCount === 'Sudah Final'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : row.statusRealCount === 'Sedang Dihitung'
+                      ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                      : 'bg-slate-50 text-slate-500 border-slate-200'
+                  }`}
+                >
+                  {row.statusRealCount}
+                </span>
+
+              </td>
+
+            </tr>
+
+          ))
+
+        )}
+
+      </tbody>
+
+
+      {/* ================================================ */}
+      {/* TOTAL */}
+      {/* ================================================ */}
+      <tfoot className="bg-slate-900 text-white">
+
+        <tr>
+
+          <td className="px-4 py-4 font-black">
+            TOTAL
+          </td>
+
+
+          {statistikSuaraKandidat.map((kandidat) => (
+
+            <td
+              key={`total-${kandidat.id}`}
+              className="px-4 py-4 text-center font-black"
+            >
+              {Number(kandidat.totalSuara || 0).toLocaleString('id-ID')}
+            </td>
+
+          ))}
+
+
+          <td className="px-4 py-4 text-center font-black">
+            {ringkasanStatistik.suaraSah.toLocaleString('id-ID')}
+          </td>
+
+          <td className="px-4 py-4 text-center font-black">
+            {ringkasanStatistik.suaraTidakSah.toLocaleString('id-ID')}
+          </td>
+
+          <td className="px-4 py-4 text-center font-black">
+            {ringkasanStatistik.totalSuaraMasuk.toLocaleString('id-ID')}
+          </td>
+
+          <td className="px-4 py-4 text-center font-black">
+            -
+          </td>
+
+        </tr>
+
+      </tfoot>
+
+    </table>
+
+  </div>
+
+</div>
+
+
+</div>
+)}
+
+
           {activeMenu === 'Dashboard' && (
             <div className="max-w-6xl mx-auto">
               {(() => {
@@ -11825,6 +13749,7 @@ async function cetakPlanoTPS(row: any) {
 
           {activeMenu !== 'Pengaturan' &&
             activeMenu !== 'Dashboard' &&
+            activeMenu !== 'Statistik' &&
             activeMenu !== 'Tugas Coklit' &&
             activeMenu !== 'Coklit' &&
             activeMenu !== 'Data Bermasalah' &&
