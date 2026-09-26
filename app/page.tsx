@@ -7949,6 +7949,104 @@ async function cetakPlanoTPS(row: any) {
   // ==========================================
   // FUNGSI HARI H (KEHADIRAN PEMILIH)
   // ==========================================
+ async function exportExcelHariH() {
+  try {
+    const isAdmin =
+      user?.role === 'Super Admin' || user?.role === 'Admin';
+
+    // Tentukan TPS yang akan diexport
+    let tpsExport = '';
+
+    if (user?.role === 'KPPS') {
+      if (!user?.tps_assigned) {
+        alert('Akun KPPS ini belum memiliki TPS penugasan.');
+        return;
+      }
+
+      tpsExport = user.tps_assigned;
+    } else if (isAdmin) {
+      if (filterTPS_HariH === 'Semua') {
+        alert('Pilih TPS terlebih dahulu sebelum export.');
+        return;
+      }
+
+      tpsExport = filterTPS_HariH;
+    } else {
+      alert('Anda tidak memiliki akses untuk export data Hari H.');
+      return;
+    }
+
+    // Ambil SEMUA DPT di TPS tersebut
+    // Tidak terpengaruh search dan tidak dibatasi 200 data
+    const { data, error } = await supabase
+      .from('penduduk')
+      .select(
+        'NAMA, NIK, TPS, RT, RW, sudah_hadir_tps, waktu_hadir_tps'
+      )
+      .eq('status_dpt', 'DPT')
+      .eq('TPS', tpsExport)
+      .order('NAMA', { ascending: true });
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      alert(`Belum ada data DPT di TPS ${tpsExport}.`);
+      return;
+    }
+
+    // Buat isi Excel
+    const rows = data.map((item, index) => ({
+      No: index + 1,
+      'Nama Pemilih': item.NAMA || '-',
+      NIK: item.NIK ? `'${item.NIK}` : '-',
+      TPS: item.TPS || '-',
+      RT: item.RT || '-',
+      RW: item.RW || '-',
+      'Status Kehadiran': item.sudah_hadir_tps
+        ? 'HADIR'
+        : 'TIDAK HADIR',
+      'Waktu Hadir':
+        item.sudah_hadir_tps && item.waktu_hadir_tps
+          ? new Date(item.waktu_hadir_tps).toLocaleString('id-ID')
+          : '-',
+    }));
+
+    // Buat worksheet
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+
+    // Lebar kolom biar rapi
+    worksheet['!cols'] = [
+      { wch: 6 },  // No
+      { wch: 30 }, // Nama
+      { wch: 22 }, // NIK
+      { wch: 10 }, // TPS
+      { wch: 8 },  // RT
+      { wch: 8 },  // RW
+      { wch: 20 }, // Status
+      { wch: 24 }, // Waktu
+    ];
+
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      `TPS ${tpsExport}`
+    );
+
+    const tanggal = new Date().toISOString().slice(0, 10);
+
+    XLSX.writeFile(
+      workbook,
+      `Daftar_Hadir_TPS_${tpsExport}_${tanggal}.xlsx`
+    );
+  } catch (err: any) {
+    console.error('Gagal export daftar hadir:', err);
+    alert('Gagal export Excel: ' + err.message);
+  }
+}
+
+ 
   async function fetchHariH() {
     setLoadingHariH(true);
 
@@ -10015,14 +10113,40 @@ async function cetakPlanoTPS(row: any) {
 
             {activeMenu === 'Hari H' && (
             <div className="max-w-6xl mx-auto pb-10">
-              <div className="mb-6">
-                <h2 className="text-2xl font-black text-slate-900">
-                  Hari H — Kehadiran Pemilih
-                </h2>
-                <p className="text-sm text-slate-500 font-bold mt-1">
-                  Cari nama pemilih dan tandai hadir saat mereka datang ke TPS.
-                </p>
-              </div>
+              <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+
+  <div>
+    <h2 className="text-2xl font-black text-slate-900">
+      Hari H — Kehadiran Pemilih
+    </h2>
+
+    <p className="text-sm text-slate-500 font-bold mt-1">
+      Cari nama pemilih dan tandai hadir saat mereka datang ke TPS.
+    </p>
+  </div>
+
+  <button
+    onClick={exportExcelHariH}
+    className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm rounded-xl shadow-sm transition-all flex items-center justify-center gap-2"
+  >
+    <svg
+      className="w-5 h-5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      strokeWidth="2.5"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4 16v1a3 3 0 0s03 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+      />
+    </svg>
+
+    Export Excel
+  </button>
+
+</div>
 
               {/* REKAP KEHADIRAN PER TPS */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
